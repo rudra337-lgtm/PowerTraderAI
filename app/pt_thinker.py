@@ -661,6 +661,52 @@ def _current_price(sym: str) -> float:
     return price
 
 
+def _replace_text(path: str, text: str) -> None:
+    """Replace ``path`` whole, so a reader sees the old or the new text, never an
+    empty file. A reader holding the file open on Windows blocks the replace for a
+    moment, so it is retried; after that the file is written in place."""
+    tmp = path + ".writing"  # not ".tmp": the hub's chart reader deletes <path>.tmp
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    for _ in range(10):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.01)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
+def _write_signal_counts(sym: str, longs: int, shorts: int) -> None:
+    """Write how many timeframes are long and short (0..7) where the trader and the
+    hub read them (long_dca_signal.txt / short_dca_signal.txt), and under the names
+    this runner used since March (signals_dca_spread / signals_dca_single.txt).
+
+    The trader reads long, short, then long again, and uses the pair only when both
+    long reads agree. Long is therefore set to 0 first, then short, then long: any
+    pair the trader accepts is one published here, or has long 0. If the short
+    count cannot be written, long stays 0. Never raises."""
+    folder = coin_folder(sym)
+    steps = [
+        ("long_dca_signal.txt", 0),
+        ("short_dca_signal.txt", shorts),
+        ("long_dca_signal.txt", longs),
+        ("signals_dca_single.txt", shorts),
+        ("signals_dca_spread.txt", longs),
+    ]
+    for name, value in steps:
+        try:
+            _replace_text(os.path.join(folder, name), str(int(value)))
+        except Exception:
+            if name == "short_dca_signal.txt":
+                return  # long stays 0: no trade on an unknown short count
+
+
 def _training_in_progress(sym: str) -> bool:
     """The pattern trainer marks trainer_status.json TRAINING while it runs."""
     try:
@@ -684,6 +730,7 @@ def _mark_unavailable(sym: str, reason) -> None:
         )
         sys.stdout.flush()
     UNAVAILABLE_COINS[sym] = str(reason)
+    _write_signal_counts(sym, 0, 0)
     try:
         display_cache[sym] = f"{sym}  (SKIPPED - no market: {reason})"
     except Exception:
@@ -698,6 +745,7 @@ def _note_coin_error(sym: str, exc) -> None:
         print(f"{sym}: skipped this pass - {message}")
         sys.stdout.flush()
     _LAST_COIN_ERROR[sym] = message
+    _write_signal_counts(sym, 0, 0)
     label = "WAITING FOR PRICE DATA" if isinstance(exc, CoinDataError) else "ERROR"
     try:
         _ready_coins.discard(sym)
@@ -855,12 +903,9 @@ def step_coin(sym: str):
                 f.write("0.25")
             with open("futures_short_profit_margin.txt", "w+") as f:
                 f.write("0.25")
-            with open("signals_dca_spread.txt", "w+") as f:
-                f.write("0")
-            with open("signals_dca_single.txt", "w+") as f:
-                f.write("0")
         except Exception:
             pass
+        _write_signal_counts(sym, 0, 0)
         _reset_coin_state(sym)
         try:
             if trained:
@@ -1521,8 +1566,6 @@ def step_coin(sym: str):
 
             with open("futures_profit_margin_spread.txt", "w+") as f:
                 f.write(str(pm))
-            with open("signals_dca_spread.txt", "w+") as f:
-                f.write(str(longs))
 
             # short pm
             current_pms = [m for m in margins if m != 0]
@@ -1535,11 +1578,11 @@ def step_coin(sym: str):
 
             with open("futures_profit_margin_single.txt", "w+") as f:
                 f.write(str(abs(pm)))
-            with open("signals_dca_single.txt", "w+") as f:
-                f.write(str(shorts))
 
         except:
             PrintException()
+            longs, shorts = 0, 0
+        _write_signal_counts(sym, longs, shorts)
 
         # ====== NON-BLOCKING candle update check (single pass) ======
         this_index_now = 0

@@ -204,6 +204,78 @@ def test_the_current_price_falls_back_to_the_candles(runner, monkeypatch):
         runner._current_price("BNB")
 
 
+def read_counts(folder):
+    out = {}
+    for name in (
+        "long_dca_signal.txt",
+        "short_dca_signal.txt",
+        "signals_dca_spread.txt",
+        "signals_dca_single.txt",
+    ):
+        with open(os.path.join(folder, name), encoding="utf-8") as f:
+            out[name] = f.read()
+    return out
+
+
+def test_signal_counts_go_where_the_trader_and_hub_read_them(runner):
+    folder = runner.coin_folder("BTC")
+    os.makedirs(folder, exist_ok=True)
+    runner._write_signal_counts("BTC", 4, 1)
+    assert read_counts(folder) == {
+        "long_dca_signal.txt": "4",
+        "short_dca_signal.txt": "1",
+        "signals_dca_spread.txt": "4",
+        "signals_dca_single.txt": "1",
+    }
+    import pt_trader
+
+    with mock.patch.object(pt_trader, "base_paths", {"BTC": folder}):
+        assert pt_trader.CryptoAPITrading._read_long_dca_signal("BTC") == 4
+        assert pt_trader.CryptoAPITrading._read_short_dca_signal("BTC") == 1
+    assert pt_hub.read_short_signal(folder) == 1
+    runner._write_signal_counts("NOFOLDER", 3, 0)  # never raises
+
+
+def test_the_trader_ignores_counts_the_runner_stopped_updating(runner):
+    import pt_trader
+
+    folder = runner.coin_folder("ETH")
+    os.makedirs(folder, exist_ok=True)
+    runner._write_signal_counts("ETH", 5, 0)
+    old = time.time() - pt_trader.SIGNAL_MAX_AGE_SECONDS - 60
+    for name in ("long_dca_signal.txt", "short_dca_signal.txt"):
+        os.utime(os.path.join(folder, name), (old, old))
+    with mock.patch.object(pt_trader, "base_paths", {"ETH": folder}):
+        assert pt_trader.CryptoAPITrading._read_long_dca_signal("ETH") == 0
+        # an unknown short count blocks a new trade (the gate needs short == 0)
+        assert pt_trader.CryptoAPITrading._read_short_dca_signal("ETH") is None
+
+
+def test_an_untrained_coin_closes_its_gate_and_says_training(runner):
+    folder = runner.coin_folder("SOL")
+    os.makedirs(folder, exist_ok=True)
+    runner._write_signal_counts("SOL", 6, 0)  # left over from before
+    with open(os.path.join(folder, "trainer_status.json"), "w") as f:
+        json.dump({"state": "TRAINING"}, f)
+    runner.step_coin("SOL")
+    assert read_counts(folder)["long_dca_signal.txt"] == "0"
+    assert "TRAINING - no signals until the new model is saved" in (
+        runner.display_cache["SOL"]
+    )
+    os.remove(os.path.join(folder, "trainer_status.json"))
+    runner.step_coin("SOL")
+    assert "NOT TRAINED" in runner.display_cache["SOL"]
+
+
+def test_a_coin_waiting_for_data_is_labelled_and_its_gate_closed(runner):
+    folder = runner.coin_folder("XRP")
+    os.makedirs(folder, exist_ok=True)
+    runner._write_signal_counts("XRP", 5, 0)
+    runner._note_coin_error("XRP", runner.CoinDataError("no 1hour price history"))
+    assert runner.display_cache["XRP"].startswith("XRP  (WAITING FOR PRICE DATA")
+    assert read_counts(folder)["long_dca_signal.txt"] == "0"
+
+
 def test_init_does_not_hang_when_the_source_is_down(runner, monkeypatch, capsys):
     monkeypatch.setattr(runner, "data_provider", TextProvider(error=OSError("down")))
     monkeypatch.setattr(runner.time, "sleep", lambda s: None)
@@ -275,6 +347,43 @@ def test_recent_candles_are_fetched_again_once_the_bar_closes():
     clock[0] = forming + HOUR + 5  # inside the ttl, but the bar has closed
     candles.kucoin_text("BTC", "1hour")
     assert len(fake.calls) == 2
+
+
+def test_the_gate_is_closed_while_the_counts_change(runner, monkeypatch):
+    written = []
+
+    def replace(path, text):
+        written.append((os.path.basename(path), text))
+
+    monkeypatch.setattr(runner, "_replace_text", replace)
+    runner._write_signal_counts("BTC", 5, 0)
+    assert written[:3] == [
+        ("long_dca_signal.txt", "0"),
+        ("short_dca_signal.txt", "0"),
+        ("long_dca_signal.txt", "5"),
+    ]
+
+    written.clear()
+
+    def short_fails(path, text):
+        if path.endswith("short_dca_signal.txt"):
+            raise OSError("disk full")
+        replace(path, text)
+
+    monkeypatch.setattr(runner, "_replace_text", short_fails)
+    runner._write_signal_counts("BTC", 5, 0)
+    assert written == [("long_dca_signal.txt", "0")]  # long stays 0
+
+
+def test_a_signal_file_is_replaced_whole(runner, tmp_path):
+    folder = tmp_path / "coin"
+    folder.mkdir()
+    path = str(folder / "long_dca_signal.txt")
+    runner._replace_text(path, "4")
+    runner._replace_text(path, "2")
+    with open(path) as f:
+        assert f.read() == "2"
+    assert os.listdir(folder) == ["long_dca_signal.txt"]  # no temp file left
 
 
 class StopStep(Exception):
