@@ -46,7 +46,14 @@ from pt_paper_mode import (
 )
 import trainer_guard
 from strategies.settings import read_strategy_settings
-from trading_mode import TradingSettings, read_trading_settings
+from trading_mode import (
+    PaperBookError,
+    PaperBookInvalid,
+    TradingSettings,
+    paper_book_path,
+    read_paper_book,
+    read_trading_settings,
+)
 from trading_mode_ui import TradingModeDialog, TradingModeIndicator, pack_at_top
 
 # Multi-exchange imports
@@ -2680,6 +2687,9 @@ class PowerTraderHub(tk.Tk):
             activeforeground=DARK_SELECT_FG,
         )
         m_settings.add_command(label="Settings...", command=self.open_settings_dialog)
+        m_settings.add_command(
+            label="Paper Account...", command=self.open_paper_account_dialog
+        )
         menubar.add_cascade(label="Settings", menu=m_settings)
 
         # Help menu
@@ -6566,18 +6576,94 @@ Platform: {sys.platform}
             fresh = False
         indicator.update_price_integrity(self._price_note_data if fresh else None)
 
+    def _shown_paper_book_path(self) -> Optional[str]:
+        """The paper book, when this hub shows the paper trader's books (paper
+        mode at start-up); else None."""
+        status_dir = os.path.dirname(getattr(self, "trader_status_path", "") or "")
+        hub_dir = getattr(self, "hub_dir", None)
+        if not hub_dir:
+            return None
+        paper_dir = os.path.join(hub_dir, "paper")
+        if os.path.normcase(os.path.abspath(status_dir)) != os.path.normcase(
+            os.path.abspath(paper_dir)
+        ):
+            return None
+        return paper_book_path(hub_dir)
+
+    @staticmethod
+    def _paper_book_status(book_path: str) -> Optional[dict]:
+        """The Account panel's figures from the saved paper book: cash as buying
+        power, positions at cost (the book holds no live prices). None when the
+        book is missing or unreadable."""
+        try:
+            book = read_paper_book(book_path)
+            if book is None:
+                return None
+            cash = book.cash_balance
+            held = sum(
+                (qty * price for qty, price in book.positions.values()), Decimal(0)
+            )
+        except PaperBookInvalid:
+            # the trader loads an invalid-but-parsable book as written
+            try:
+                with open(book_path, "r", encoding="utf-8") as f:
+                    state = json.load(f)
+                cash = Decimal(state["cash_balance"])
+                held = sum(
+                    (
+                        Decimal(p["quantity"]) * Decimal(p["average_price"])
+                        for p in (state.get("positions") or {}).values()
+                    ),
+                    Decimal(0),
+                )
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                AttributeError,
+                ArithmeticError,
+            ):
+                return None
+        except PaperBookError:  # unreadable: the trader starts a fresh book
+            return None
+        total = cash + held
+        return {
+            "source": "paper_book",
+            "account": {
+                "total_account_value": float(total),
+                "buying_power": float(cash),
+                "holdings_sell_value": float(held),
+                "holdings_buy_value": float(held),
+                "percent_in_trade": float(held / total * 100) if total > 0 else 0.0,
+            },
+            "positions": {},
+        }
+
     def _refresh_trader_status(self) -> None:
         # mtime cache: rebuilding the whole tree every tick is expensive with many rows
         try:
             mtime = os.path.getmtime(self.trader_status_path)
         except Exception:
             mtime = None
+        # The saved paper book counts too: after it is edited (Settings > Paper
+        # Account) and until the trader reports again, the panel shows the book.
+        book_path = self._shown_paper_book_path()
+        try:
+            book_mtime = os.path.getmtime(book_path) if book_path else None
+        except OSError:
+            book_mtime = None
 
-        if getattr(self, "_last_trader_status_mtime", object()) == mtime:
+        key = (mtime, book_mtime)
+        if getattr(self, "_last_trader_status_mtime", object()) == key:
             return
-        self._last_trader_status_mtime = mtime
+        self._last_trader_status_mtime = key
 
         data = _safe_read_json(self.trader_status_path)
+        if book_mtime is not None and (mtime is None or book_mtime > mtime):
+            book_data = self._paper_book_status(book_path)
+            if book_data is not None:
+                data = book_data
         if not data:
             # account summary (right-side status area)
             try:
@@ -6607,8 +6693,10 @@ Platform: {sys.platform}
 
             self._last_total_account_value = total_val
 
+            from_book = data.get("source") == "paper_book"
             self.lbl_acct_total_value.config(
                 text=f"Total Account Value: {_fmt_money(acct.get('total_account_value', None))}"
+                + (" (saved paper account)" if from_book else "")
             )
             self.lbl_acct_holdings_value.config(
                 text=f"Holdings Value: {_fmt_money(acct.get('holdings_sell_value', None))}"
@@ -7366,6 +7454,67 @@ Platform: {sys.platform}
         # Restore selection
         self._show_chart_page(selected)
 
+    # ---- paper account (the paper trader's book) ----
+
+    def _paper_trader_running_reason(self) -> Optional[str]:
+        """Why the paper book must not be saved now, or None.
+
+        A running trader never reloads the book and saves over it after every
+        order, so an edit made while it runs would be lost. Checked at the moment
+        of saving."""
+        proc = getattr(getattr(self, "proc_trader", None), "proc", None)
+        if (proc is not None and proc.poll() is None) or getattr(
+            self, "_auto_start_trader_pending", False
+        ):
+            return (
+                "The trader is running (or about to start), and it would overwrite "
+                "these values. Stop it with the ■ (Stop trader) button in the "
+                "Trading section, then save here; this window can stay open."
+            )
+        if proc is None:
+            # Not started by this hub: a trader started elsewhere is seen only by a
+            # fresh paper status file (the hub's 2-minute freshness rule).
+            status = _safe_read_json(
+                os.path.join(
+                    getattr(self, "hub_dir", ""), "paper", "trader_status.json"
+                )
+            )
+            if not isinstance(status, dict):
+                status = {}
+            try:
+                age = time.time() - float(status.get("timestamp"))
+            except (TypeError, ValueError):
+                age = None
+            if age is not None and 0 <= age <= 120.0:
+                return (
+                    "A paper trader updated its status less than 2 minutes ago, so "
+                    "it may still be running outside this window. Stop it (or wait "
+                    "2 minutes if it has stopped), then save."
+                )
+        return None
+
+    def open_paper_account_dialog(self, parent=None):
+        """Settings > Paper Account: the starting balance, cash and positions the
+        paper trader starts from (``<hub>/paper/paper_account.json``)."""
+        try:
+            from paper_account_ui import PaperAccountDialog
+
+            paper_mode = bool(getattr(self, "_paper_mode", True))
+            return PaperAccountDialog(
+                parent or self,
+                hub_dir=self.hub_dir,
+                trader_running=self._paper_trader_running_reason,
+                known_coins=getattr(self, "coins", ()) or (),
+                palette=get_palette(paper_mode),
+                live=not paper_mode,
+                on_saved=self._refresh_trader_status,
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "Paper Account", f"Could not open the paper account: {e}"
+            )
+            return None
+
     # ---- settings dialog ----
 
     def open_settings_dialog(self) -> None:
@@ -7752,6 +7901,17 @@ Platform: {sys.platform}
             frm, text="Configure Exchange APIs...", command=open_exchange_setup
         ).grid(row=r, column=0, columnspan=2, sticky="w", pady=6)
         ttk.Label(frm, text="").grid(row=r, column=2, sticky="e", padx=(10, 0), pady=6)
+        r += 1
+
+        # Paper account: the paper trader's book (balances and positions)
+        ttk.Button(
+            frm,
+            text="Paper Account...",
+            command=lambda: self.open_paper_account_dialog(win),
+        ).grid(row=r, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Label(
+            frm, text="starting balance, cash and positions for paper trading"
+        ).grid(row=r, column=2, sticky="e", padx=(10, 0), pady=6)
         r += 1
 
         ttk.Separator(frm, orient="horizontal").grid(

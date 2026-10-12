@@ -346,7 +346,18 @@ class PaperTradingAccount:
         return order.order_id
 
     def _validate_order_risk(self, order: Order) -> bool:
-        """Validate order against risk limits."""
+        """Validate order against risk limits.
+
+        The size limit guards new exposure. A sell of no more than the coin held
+        only reduces exposure, so it is never refused for its size: otherwise a
+        position worth over 10% of the account could not be closed."""
+        held = self.positions.get(order.symbol)
+        if (
+            order.side == OrderSide.SELL
+            and held is not None
+            and order.quantity <= held.quantity
+        ):
+            return True
         try:
             current_value = float(self.total_portfolio_value)
             current_price = self.market_simulator.get_current_price(order.symbol)

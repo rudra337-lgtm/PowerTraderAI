@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -127,7 +128,12 @@ class DemoTests(unittest.TestCase):
         ), tempfile.TemporaryDirectory() as workdir:
             code, output = self.run_demo(workdir=workdir)
             self.assertEqual(code, 0, output)
-            self.assertTrue(os.path.exists(os.path.join(workdir, "paper_account.json")))
+            # the book now exists from start-up, so check it recorded the demo's orders
+            with open(
+                os.path.join(workdir, "paper_account.json"), encoding="utf-8"
+            ) as f:
+                book = json.load(f)
+            self.assertTrue(book["positions"] or book["cash_balance"] != "10000", book)
 
         self.assertEqual(os.path.exists(config), config_before is not None)
         if config_before is not None:
