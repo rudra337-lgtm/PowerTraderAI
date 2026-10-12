@@ -90,7 +90,9 @@ def test_a_bar_with_no_trade_yet_gets_a_flat_placeholder():
 
 def test_weekly_bars_open_on_monday():
     fake = FakeKlines([])
-    candles = runner_history.RecentCandles(fetcher=fake, clock=lambda: NOW)
+    candles = runner_history.RecentCandles(
+        fetcher=fake, clock=lambda: NOW, listing=lambda pair: None  # no network
+    )
     with pytest.raises(Exception):
         candles.kucoin_text("ETH", "1week")  # no closed bar in the fake
     symbol, tf, start_ms = fake.calls[0]

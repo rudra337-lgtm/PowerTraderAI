@@ -126,8 +126,10 @@ RawFetcher = Callable[[str, str, int, Optional[int]], List[list]]
 
 def _frame_from_klines(rows: List[list]) -> pd.DataFrame:
     if not rows:
+        # Typed like a full frame: a page with no bars (a range before the pair was
+        # listed, or after it stopped trading) is still compared by open_time.
         return pd.DataFrame(columns=CANDLE_COLUMNS).astype(
-            {c: "float64" for c in _NUMERIC}
+            {"open_time": "datetime64[ns, UTC]", **{c: "float64" for c in _NUMERIC}}
         )
     df = pd.DataFrame(
         {
@@ -253,6 +255,8 @@ def _write_cache(path: str, df: pd.DataFrame) -> None:
 
 
 def _closed_only(df: pd.DataFrame, tf: str, now: pd.Timestamp) -> pd.DataFrame:
+    if df.empty:
+        return df.reset_index(drop=True)
     close_time = df["open_time"] + pd.Timedelta(seconds=candle_timeframe_seconds(tf))
     return df[close_time <= now].reset_index(drop=True)
 

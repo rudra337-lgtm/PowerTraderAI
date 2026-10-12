@@ -110,7 +110,9 @@ if keyring is not None:
 
 @pytest.fixture(autouse=True)
 def isolated_user_dirs(tmp_path, monkeypatch):
-    """Fresh POWERTRADER_HOME, empty legacy folder and empty keyring per test."""
+    """Fresh POWERTRADER_HOME, empty legacy folder and empty keyring per test, and no
+    request to Binance's exchange information: the shared market-status check answers
+    "unknown" (a test that needs a verdict passes its own)."""
     home = tmp_path / "pt_home"
     legacy = tmp_path / "pt_legacy"
     legacy.mkdir()
@@ -120,6 +122,19 @@ def isolated_user_dirs(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
     monkeypatch.setattr(pt_paths, "legacy_dir", lambda: str(legacy))
     monkeypatch.setattr(pt_paths, "legacy_install_dir", lambda: str(legacy_root))
+    try:
+        from market_data import listing
+    except ImportError:  # loaded from outside app/ (.github/scripts)
+        listing = None
+    if listing is not None:
+        monkeypatch.setattr(
+            listing,
+            "pair_status",
+            lambda pair: listing.PairStatus(
+                str(pair).upper(), None, "tests: no network"
+            ),
+        )
+        monkeypatch.setattr(listing, "_shared", None)
     memory = None
     if keyring is not None:
         previous = keyring.get_keyring()

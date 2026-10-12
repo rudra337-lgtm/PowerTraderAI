@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import colorama
 import pt_paths
 from colorama import Fore, Style
+from market_data.listing import not_trading_reason
 from pt_cost import CostManager, PerformanceTier
 from pt_exchange_abstraction import OrderResult
 from pt_logging import get_logger
@@ -890,6 +891,27 @@ class CryptoAPITrading:
             return val
         except Exception:
             return 0
+
+    def _market_not_trading(self, symbol: str) -> Optional[str]:
+        """Why ``symbol`` must get no buys, or None. The runner and the trainer record
+        in the coin's folder when its Binance market is not trading (delisted, halted,
+        or never listed): no entry and no DCA buy is made in such a coin. Sells are
+        not blocked. The reason is printed once per coin."""
+        sym = str(symbol).upper().strip()
+        folder = base_paths.get(
+            sym, main_dir if sym == "BTC" else os.path.join(main_dir, sym)
+        )
+        reason = not_trading_reason(folder)
+        noted = self.__dict__.setdefault("_not_trading_noted", set())
+        if reason is None:
+            noted.discard(sym)
+        elif sym not in noted:
+            noted.add(sym)
+            print(
+                f"  No buys in {sym}: {reason}. Lifted once the runner or a training "
+                "run sees its market trading."
+            )
+        return reason
 
     @staticmethod
     def _read_short_dca_signal(symbol: str) -> Optional[int]:
@@ -2232,7 +2254,9 @@ class CryptoAPITrading:
                     neural_level_now >= neural_level_needed
                 )
 
-            if hard_hit or neural_hit:
+            if (hard_hit or neural_hit) and self._market_not_trading(symbol):
+                pass  # its market is not trading: no DCA buy (reason printed once)
+            elif hard_hit or neural_hit:
                 if neural_hit and hard_hit:
                     reason = f"NEURAL L{neural_level_now}>=L{neural_level_needed} OR HARD {hard_level:.2f}%"
                 elif neural_hit:
@@ -2355,6 +2379,11 @@ class CryptoAPITrading:
 
             # Skip if already held
             if full_symbol in holding_full_symbols:
+                start_index += 1
+                continue
+
+            # Never open a position in a coin whose market is not trading
+            if self._market_not_trading(base_symbol):
                 start_index += 1
                 continue
 

@@ -25,6 +25,7 @@ from nacl.signing import SigningKey
 # Local imports
 import model_store
 import pt_paths
+from market_data import listing as market_listing
 from pt_credentials import get_credentials
 from pt_data_provider import get_data_provider
 
@@ -619,6 +620,10 @@ def _history_rows(coin: str, tf: str) -> list:
             continue
         rows = history.split("], [")
         if len(rows) >= 2:
+            # bars arrived, so the market trades (a closed market raises above)
+            _record_market(
+                coin.split("-")[0].upper(), True, "the runner receives its bars"
+            )
             return [
                 str(r).replace('"', "").replace("'", "").replace("[", "").split(", ")
                 for r in rows
@@ -723,18 +728,65 @@ UNAVAILABLE_COINS = {}
 
 
 def _mark_unavailable(sym: str, reason) -> None:
-    if sym not in UNAVAILABLE_COINS:
+    if _UNAVAILABLE_PRINTED.get(sym) != str(reason):
         print(
-            f"Skipping {sym}: {reason}. It gets no signals. Remove it from Coins in "
-            "Settings, or connect an exchange that lists it and restart the runner."
+            f"Skipping {sym}: {reason}. It gets no signals, and the trader makes no "
+            "buys in it. It is checked again every hour; remove it from Coins in "
+            "Settings if it is gone for good."
         )
         sys.stdout.flush()
+        _UNAVAILABLE_PRINTED[sym] = str(reason)
     UNAVAILABLE_COINS[sym] = str(reason)
+    _UNAVAILABLE_SINCE[sym] = time.time()
     _write_signal_counts(sym, 0, 0)
+    _record_market(sym, False, str(reason))
     try:
         display_cache[sym] = f"{sym}  (SKIPPED - no market: {reason})"
     except Exception:
         pass
+
+
+# When each unavailable coin was last found closed, and the reason last printed.
+_UNAVAILABLE_SINCE = {}
+_UNAVAILABLE_PRINTED = {}
+UNAVAILABLE_RECHECK_SECONDS = 3600
+
+
+def _recheck_unavailable(sym: str) -> bool:
+    """For a skipped coin: once an hour, ask Binance again. True when its market
+    trades again, and the coin is taken off the skipped list (its next step fetches
+    bars and records it trading); False while it stays skipped."""
+    if time.time() - _UNAVAILABLE_SINCE.get(sym, 0.0) < UNAVAILABLE_RECHECK_SECONDS:
+        return False
+    _UNAVAILABLE_SINCE[sym] = time.time()
+    status = _market_status(sym)
+    if status is None or status.trading is not True:
+        return False
+    UNAVAILABLE_COINS.pop(sym, None)
+    _UNAVAILABLE_PRINTED.pop(sym, None)
+    print(f"{sym}: {status.describe()} again; processing it.")
+    sys.stdout.flush()
+    return True
+
+
+def _market_status(sym: str):
+    """Binance's cached verdict on the coin's spot pair, or None if unknown."""
+    try:
+        return market_listing.pair_status(f"{sym}USDT")
+    except Exception:
+        return None
+
+
+def _record_market(sym: str, trading: bool, reason: str) -> None:
+    """Keep the coin's market verdict in its folder, where the trader reads it: a
+    coin whose market is not trading gets no buys (pt_trader). The file is compared,
+    not a memory of this process's last write, so a verdict another process wrote
+    (a refused training run) is corrected, and a write that failed is tried again."""
+    folder = coin_folder(sym)
+    record = market_listing.read_market_status(folder)
+    if record is not None and record.get("trading") is trading:
+        return
+    market_listing.write_market_status(folder, f"{sym}USDT", trading, reason)
 
 
 def _note_coin_error(sym: str, exc) -> None:
@@ -897,6 +949,12 @@ def step_coin(sym: str):
     # A trained coin whose model files match no published manifest is held the same way.
     trained = _coin_is_trained(sym)
     if not trained or not _model_verified(sym):
+        # No bars are fetched for this coin below, so ask Binance directly whether its
+        # market still trades: a held coin must not keep getting DCA buys after a
+        # delisting just because it is untrained (cached: one request per hour).
+        status = _market_status(sym)
+        if status is not None and status.trading is False:
+            raise CoinUnavailable(status.describe())
         try:
             # Prevent new trades (and DCA) by forcing signals to 0 and keeping PM at baseline.
             with open("futures_long_profit_margin.txt", "w+") as f:
@@ -1690,7 +1748,7 @@ def main():
                 coins_to_process = [target_coin]
 
             for _sym in coins_to_process:
-                if _sym in UNAVAILABLE_COINS:
+                if _sym in UNAVAILABLE_COINS and not _recheck_unavailable(_sym):
                     continue
                 print(f"Processing {_sym}...")
                 sys.stdout.flush()

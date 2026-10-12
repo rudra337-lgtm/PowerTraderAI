@@ -11,6 +11,11 @@ Nothing is written to disk (the trainer owns the candle cache files); results
 are kept in memory for up to ``ttl`` seconds, and never past the forming bar's
 close, because the runner asks for the same coin and timeframe several times
 per pass.
+
+When the bar before the forming one is missing, Binance is asked whether the pair
+still trades (market_data.listing). A pair it no longer trades is reported as a
+missing market, so the runner skips the coin; otherwise CandleDataError says the
+bar has not arrived. Either way no signals are computed from bars that stopped.
 """
 
 from __future__ import annotations
@@ -62,12 +67,14 @@ class RecentCandles:
         ttl: float = 30.0,
         closed_bars: int = 3,
         clock: Callable[[], float] = time.time,
+        listing: Optional[Callable[[str], object]] = None,
     ) -> None:
         # One request per call: the runner retries on its own and must not stall.
         self._fetcher = fetcher or BinanceKlines(max_retries=0, timeout=10.0)
         self._ttl = ttl
         self._closed_bars = closed_bars
         self._clock = clock
+        self._listing = listing  # pair -> listing.PairStatus; None: the shared check
         self._cache: Dict[Tuple[str, str], Tuple[float, str]] = {}
         self._lock = threading.Lock()
 
@@ -107,9 +114,19 @@ class RecentCandles:
                 closed.append(row)
             elif open_s == forming_open:
                 forming = row
-        if not closed:
-            raise CandleDataError(f"no closed {tf} candle for {pair}")
         closed.sort(key=lambda row: row[0], reverse=True)
+        if not closed or closed[0][0] < forming_open - step:
+            # The last closed bar is missing: is the pair still trading at all? If
+            # not, it is a missing market; otherwise wait for the bar (no signals
+            # are computed from bars that stopped arriving).
+            status = self._pair_status(pair)
+            if status is not None and status.trading is False:
+                raise MarketNotFound(status.describe())
+            if not closed:
+                raise CandleDataError(f"no closed {tf} candle for {pair}")
+            raise CandleDataError(
+                f"no {tf} candle for {pair} since the one opening at {closed[0][0]}"
+            )
         if forming is None:  # no trade yet in this bar: a flat one at the last close
             last_close = closed[0][2]
             forming = [forming_open, last_close, last_close, last_close, last_close]
@@ -120,6 +137,17 @@ class RecentCandles:
         with self._lock:
             self._cache[(pair, tf)] = (expiry, text)
         return text
+
+    def _pair_status(self, pair: str):
+        """Binance's verdict on the pair, or None if the check itself failed."""
+        try:
+            if self._listing is not None:
+                return self._listing(pair)
+            from market_data import listing
+
+            return listing.pair_status(pair)
+        except Exception:
+            return None
 
 
 _shared: Optional[RecentCandles] = None
