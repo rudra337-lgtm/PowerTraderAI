@@ -8837,6 +8837,9 @@ Platform: {sys.platform}
                 self.settings["training_notifications"] = notifications_var.get()
 
                 self._save_settings()
+                # the runner, trainers and trader read the exchange choice from
+                # trading_config.json, not from gui_settings.json
+                self._sync_exchange_choice()
 
                 # Apply theme changes
                 self._apply_theme()
@@ -8966,6 +8969,42 @@ Platform: {sys.platform}
         else:
             return {"status": "stopped", "message": "API server is stopped"}
 
+    def _exchange_status_once(self, primary_exchange: str) -> Tuple[str, str]:
+        """One status check of the primary exchange: ``(status, details)``.
+
+        It asks the exchange's own connector for a public BTC price (no key
+        needed). The hub's MultiExchangeManager is never connected, so the old
+        check always reported "Exchange not available". The details also say
+        whether this version can trade live on that exchange: most connectors
+        serve prices only (no balances or orders)."""
+        name = primary_exchange.upper()
+        try:
+            import pt_exchanges  # noqa: F401  (registers the connectors)
+            from pt_exchange_abstraction import ExchangeFactory, ExchangeType
+
+            cache = getattr(self, "_status_exchanges", None)
+            if cache is None:
+                cache = self._status_exchanges = {}
+            exchange = cache.get(primary_exchange)
+            if exchange is None:
+                exchange = ExchangeFactory.get_exchange(ExchangeType(primary_exchange))
+                cache[primary_exchange] = exchange
+            price = float(exchange.get_current_price("BTC-USD"))
+        except Exception as exc:
+            return f"❌ {name}", f"No price from {primary_exchange}: {str(exc)[:160]}"
+        if price <= 0:
+            return f"⚠️ {name}", f"{primary_exchange} answered but gave no price"
+        if getattr(exchange, "SUPPORTS_LIVE_ORDERS", False):
+            return (
+                f"✅ {name}",
+                f"Prices OK | BTC ${price:,.2f} | live orders supported",
+            )
+        return (
+            f"✅ {name} (prices only)",
+            f"Prices OK | BTC ${price:,.2f} | this version cannot read balances or "
+            f"place live orders on {primary_exchange}; paper trading works",
+        )
+
     def _check_exchange_status_worker(self):
         """Background worker to check exchange connectivity"""
         while True:
@@ -8987,35 +9026,7 @@ Platform: {sys.platform}
                     time.sleep(30)
                     continue
 
-                # Check if primary exchange is available
-                available_exchanges = self._multi_exchange.get_available_exchanges()
-
-                if primary_exchange in available_exchanges:
-                    # Try to get market data to test connectivity
-                    try:
-                        # Test with a common symbol
-                        test_symbol = (
-                            "BTCUSD"
-                            if primary_exchange
-                            in ["coinbase", "kraken", "binance", "kucoin"]
-                            else "BTC"
-                        )
-                        market_data = self._multi_exchange.get_market_data(
-                            test_symbol, primary_exchange
-                        )
-
-                        if market_data and market_data.price > 0:
-                            status = f"✅ {primary_exchange.upper()}"
-                            details = f"Connected | Price: ${market_data.price:,.2f}"
-                        else:
-                            status = f"⚠️ {primary_exchange.upper()}"
-                            details = "Connected but no data"
-                    except Exception:
-                        status = f"❌ {primary_exchange.upper()}"
-                        details = "Connection failed"
-                else:
-                    status = f"❌ {primary_exchange.upper()}"
-                    details = "Exchange not available"
+                status, details = self._exchange_status_once(primary_exchange)
 
                 # Update status
                 self._exchange_status = {"status": status, "details": details}
@@ -9051,6 +9062,34 @@ Platform: {sys.platform}
                     )
         except Exception:
             pass
+
+    def _sync_exchange_choice(self) -> None:
+        """Write the Settings window's region and primary exchange into the shared
+        exchange config (``trading_config.json``), which the neural runner, the
+        trainers and the trader read. ``gui_settings.json`` is the hub's own copy;
+        without this the processes kept an old primary (e.g. binance)."""
+        if not EXCHANGE_SUPPORT_AVAILABLE:
+            return
+        region = str(self.settings.get("region", "") or "").strip().upper()
+        primary = str(self.settings.get("primary_exchange", "") or "").strip().lower()
+        if not region and not primary:
+            return
+        try:
+            manager = ExchangeConfigManager()
+            config = manager.load_config() or manager.create_default_config(
+                region or "GLOBAL"
+            )
+            changed = False
+            if region and config.user_region != region:
+                config.user_region = region
+                changed = True
+            if primary and config.primary_exchange != primary:
+                config.primary_exchange = primary
+                changed = True
+            if changed:
+                manager.save_config(config)
+        except Exception as e:
+            print(f"Could not save the exchange choice for the runner and trader: {e}")
 
     def refresh_exchange_settings(self):
         """Refresh exchange system with new settings - called when settings are saved"""

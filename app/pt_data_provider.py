@@ -44,9 +44,14 @@ class DataProvider:
                 config_manager = ExchangeConfigManager()
                 self.multi_exchange = MultiExchangeManager(config_manager)
 
-                # Use configured region or environment variable
-                user_region = config.get(
-                    "user_region", os.environ.get("POWERTRADER_USER_REGION", "GLOBAL")
+                # Region: the environment variable, else the shared exchange config
+                # (trading_config.json, which Settings saves), else the old file.
+                shared = config_manager.load_config()
+                user_region = (
+                    os.environ.get("POWERTRADER_USER_REGION")
+                    or (shared.user_region if shared else None)
+                    or config.get("user_region")
+                    or "GLOBAL"
                 )
                 if self.multi_exchange.initialize(user_region):
                     self.initialized = True

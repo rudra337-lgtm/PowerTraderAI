@@ -218,6 +218,8 @@ class BinanceExchange(AbstractExchange):
     multi-broker selector (#96) can flip the toggle per user preference.
     """
 
+    SUPPORTS_LIVE_ORDERS = True
+
     def __init__(
         self,
         api_key: str = "",

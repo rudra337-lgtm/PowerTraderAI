@@ -224,6 +224,10 @@ class ExchangeRegion(Enum):
 class AbstractExchange(abc.ABC):
     """Abstract base class for all exchange implementations"""
 
+    # True only for connectors that really read balances and place orders. Most
+    # connectors raise NotImplementedError for both and can serve prices only.
+    SUPPORTS_LIVE_ORDERS = False
+
     def __init__(self, api_key: str = "", api_secret: str = "", **kwargs):
         self.api_key = api_key
         self.api_secret = api_secret
