@@ -140,6 +140,33 @@ class UsageError(TrainerError):
     """Bad arguments or a working folder the trainer refuses to use."""
 
 
+class MarketClosedError(TrainerError):
+    """The pair's bars stop well before a live run's train_end, or Binance does not
+    list it. ``confirmed``: Binance says the pair is not trading (or not listed), so
+    the coin is recorded as not trading; otherwise (Binance says it trades, or could
+    not be asked) the run is refused but nothing is recorded."""
+
+    def __init__(self, pair, reason, confirmed=True):
+        if confirmed:
+            advice = (
+                "not training a coin that no longer trades. Remove it from Coins in "
+                "Settings, or train it again once it trades"
+            )
+        else:
+            advice = "not training on bars that stop early. Try again later"
+        super().__init__(f"{reason}: {advice}.")
+        self.pair = pair
+        self.reason = reason
+        self.confirmed = confirmed
+
+
+# A run whose train_end is this close to now trains a model for live use; its bars
+# must reach train_end. A run on an older window may end on a short tail.
+LIVE_WINDOW = timedelta(days=2)
+# Missing at the end of a live window that means "stopped trading", not a late bar.
+STALE_TAIL = timedelta(hours=6)
+
+
 # --- inputs ---------------------------------------------------------------------------
 
 
@@ -245,15 +272,47 @@ class BarLoader:
     """Closed bars for one pair inside ``[train_start, train_end)``, from the candle
     cache (filled from Binance unless offline). This is the only data source."""
 
-    def __init__(self, pair, train_start, train_end, offline, cache_dir=None):
+    def __init__(
+        self, pair, train_start, train_end, offline, cache_dir=None, status_of=None
+    ):
         self.pair = pair
         self.train_start = train_start
         self.train_end = train_end
         self.offline = offline
         self.cache_dir = cache_dir
+        self.status_of = status_of  # pair -> listing.PairStatus; None: the shared check
         self._bars = {}
         self.frames = {}
         self.reports = {}
+
+    def _check_tail(self, tf, last_open, step, missing_end):
+        """A live run whose bars stop well before train_end: the pair stopped trading.
+        Binance is asked why; the run is refused either way."""
+        if self.offline or missing_end == 0:
+            return
+        now = datetime.now(timezone.utc)
+        if abs(now - self.train_end) > LIVE_WINDOW:
+            return  # an older window: a short tail is reported, not refused
+        if missing_end * step < max(3 * step, STALE_TAIL):
+            return  # a late or missing bar or two, not a market that stopped
+        try:
+            if self.status_of is not None:
+                status = self.status_of(self.pair)
+            else:
+                from market_data import listing
+
+                status = listing.pair_status(self.pair)
+        except Exception:
+            status = None
+        last_close = _iso(last_open + step)
+        if status is not None and status.trading is False:
+            reason = f"{status.describe()} (its {tf} bars stop at {last_close})"
+            raise MarketClosedError(self.pair, reason, confirmed=True)
+        said = (
+            "status unknown" if status is None or status.trading is None else "trading"
+        )
+        reason = f"{self.pair} has no {tf} bars after {last_close} (Binance: {said})"
+        raise MarketClosedError(self.pair, reason, confirmed=False)
 
     def bars(self, tf_choice):
         if tf_choice not in self._bars:
@@ -312,6 +371,10 @@ class BarLoader:
                 now=end,
             )
         except CandleDataError as exc:
+            if getattr(exc.__cause__, "code", None) == 400:  # klines: unknown symbol
+                raise MarketClosedError(
+                    self.pair, f"Binance has no spot market {self.pair}"
+                ) from None
             raise TrainerError(f"candles {self.pair} {tf}: {exc}") from exc
         if df.empty:
             raise TrainerError(
@@ -330,6 +393,7 @@ class BarLoader:
             )
         missing_start = int((first_open - first_expected) // step)
         missing_end = int((last_expected - last_open) // step)
+        self._check_tail(tf, last_open, step, missing_end)
         report = df.attrs.get("report")
         self.frames[tf] = df
         self.reports[tf] = {
@@ -1127,6 +1191,26 @@ def main(argv=None) -> int:
             model_id = None
         else:
             model_id = provenance(coin, folder, cfg, result)
+    except MarketClosedError as exc:
+        # Not a crash: say why. A closure Binance confirmed is recorded, so the
+        # trader makes no buys in the coin; an unconfirmed one is only refused.
+        if exc.confirmed:
+            from market_data.listing import write_market_status
+
+            write_market_status(folder, exc.pair, False, exc.reason)
+        print(f"ERROR: training refused for {coin}: {exc}")
+        try:
+            _write_status(
+                folder,
+                coin,
+                "ERROR",
+                started_at,
+                error=str(exc),
+                finished_at=int(time.time()),
+            )
+        except OSError:
+            pass
+        return 1
     except Exception as exc:
         traceback.print_exc()
         print(f"ERROR: training failed for {coin}: {exc}")
@@ -1168,6 +1252,17 @@ def main(argv=None) -> int:
         json.dumps(summary, indent=2),
     )
     _write_status(folder, coin, "FINISHED", started_at, finished_at=finished_at)
+    if (
+        not cfg["offline"]
+        and abs(datetime.now(timezone.utc) - cfg["train_end"]) <= LIVE_WINDOW
+    ):
+        # a live run's bars reached train_end: the market trades (this clears a
+        # "not trading" record from an earlier refused run)
+        from market_data.listing import write_market_status
+
+        write_market_status(
+            folder, f"{coin}USDT", True, "training bars reach train_end"
+        )
     _write_text(os.path.join(folder, "trainer_last_start_time.txt"), str(started_at))
     # last, so a coin only counts as trained once every file is in place
     _write_text(
