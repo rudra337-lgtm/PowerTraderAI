@@ -2,11 +2,11 @@
 
 **Issue:** none yet. Raise "Pre-registered audit of signal candidates" and link it here.
 **Target repo:** `sjackson0109/powertraderai`
-**Branch:** this spec is on `docs/fds-sig-001-signal-audit`, cut from `main` at `00d9c99`. The implementation goes on `feat/signal-audit-1`, cut from `main` after this spec is merged.
+**Branch:** this spec is on `docs/fds-sig-001-signal-audit`, cut from `main` at `00d9c99`. The implementation and round one's registration go on `feat/signal-audit-1`, cut from `main` after this spec is merged.
 **Recommended model:** Claude Opus 5.5, effort high, for the statistics module and the report generator. Sonnet 5.5, effort high, for fetching and plumbing.
 **Run log:** `docs/dev/RUN-LOG-sig-<N>.md` for round N, in the same format as batch 1.
 **Status:** draft for owner review. This version adopts the owner's decisions of 2026-10-12 (§15.1) and lists the defaults it sets that still need confirming (§15.3). Nothing is implemented yet, and this document changes no code, trainer or strategy.
-**Related:** FDS-SIG-002 (the round-one candidates) depends on this spec.
+**Related:** FDS-SIG-002, `docs/dev/specs/FDS-SIG-002-round-one-candidates.md`, names round one's candidates and depends on this spec.
 
 ---
 
@@ -153,9 +153,10 @@ A candidate is registered as an exact rule, not a name. For each candidate the r
    - **two-sided:** it can emit both up and down;
    - **one-sided:** only up, or only down, plus abstain.
 
-   A long-only "enter when X" rule is one-sided. A constant caller ("always up") is two-sided. It has no discordant
-   pairs (§7.1) when the up share is at least 50%, and m = n otherwise. A constant caller is a single run, so it always
-   falls below the 30-block floor (§7.4) and is NOT ASSESSABLE.
+   A long-only "enter when X" rule is one-sided. A constant caller ("always up") is registered as two-sided by
+   convention, as the reference comparator. It has no discordant pairs (§7.1) when the up share is at least 50%, and
+   m = n otherwise. None of its call indicators varies, so it falls below the 30-block floor (§7.4) and is NOT
+   ASSESSABLE.
 5. **Warm-up:** the number of bars the rule needs before its first call. Warm-up bars come from before the window and are
    never scored.
 6. **A trained model** (STRAT-003 or a future one) is registered with:
@@ -303,22 +304,29 @@ u = 1 on an up call; and y = 1 on an up outcome.
 For a down-only candidate the one-sided contributions are negated. A unit test shows that the contributions reproduce
 each statistic exactly.
 
-**Block length L.** L is set from the calls alone, never from the outcomes:
-- **The autocorrelation time:** for each call indicator that is not constant (I, and u on the called pairs), compute
-  τ = 1 + 2 Σ ρ̂_k. The sum runs over lags k = 1, 2, …, stopping before the first lag at which the sample
-  autocorrelation ρ̂_k falls below 2/√E, the noise level. Use the larger τ.
-- **L is the larger of** one day of bars (24 at 1h, 6 at 4h) and ⌈2τ⌉.
+**Block length L.** L is set from the calls alone, never from the outcomes.
+- **The call indicators:** I over the E eligible pairs, and u over the n called pairs.
+- **Their autocorrelation time:** for each indicator that is not constant, over its own series of length S, compute a
+  Bartlett-weighted autocorrelation time:
+  - τ = max(1, 1 + 2 Σ_{k=1..M} (1 − k/(M + 1)) ρ̂_k);
+  - M = min(one month of bars, ⌊S/4⌋), where one month is 720 bars at 1h and 180 at 4h.
 
-A rule whose calls flicker from bar to bar while its underlying tendency drifts slowly therefore gets long blocks. Such
-a rule usually falls below the 30-block floor and is NOT ASSESSABLE, rather than passing on a block length that only
-measures how often its call flips.
+  There is no noise cutoff, so a small but persistent autocorrelation still counts. Use the larger τ.
+- **L is the larger of** one day of bars (24 at 1h, 6 at 4h) and ⌈2τ⌉.
+- **A constant caller:** if no call indicator varies, L = E. Then K = 1, and every statistic is below the block floor.
+
+A rule whose calls flicker from bar to bar while its underlying tendency drifts slowly therefore gets longer blocks. A
+strongly drifting one falls below the 30-block floor and is NOT ASSESSABLE, rather than passing on a block length that
+only measures how often its call flips. A very weak, slow drift can still be under-blocked. §16 item 2 tests the rule
+at stated drift sizes, and if it fails there, M is raised.
 
 **Floors per statistic.** Below any of these, that statistic is NOT ASSESSABLE for the row:
 - at least **30 blocks** (K = ⌊E / L⌋ ≥ 30);
 - **m ≥ 200** discordant pairs, for §7.1;
 - **at least 200 abstained eligible pairs**, for §7.2 and the one-sided magnitude test.
 
-**Two dependence-robust p-values.** Each is one-sided, and each is also computed for the opposite tail (§7.5):
+**Two dependence-robust p-values.** Each is one-sided. Each is also computed for the opposite tail (§7.5), except for the
+two-sided hit rate: its WORSE p-values come from the §7.5 contribution and Fisher's lower tail.
 - **Circular block bootstrap** of the centred contributions.
   - The p-value is (1 + #{T* ≥ T}) / (B + 1).
   - B is at least 100 / α₁, where α₁ = 0.05 / F is Holm's first step: 80,000 resamples at F = 40, 320,000 at F = 160.
@@ -331,6 +339,10 @@ measures how often its call flips.
 **The p-value that enters Holm** (§8.1) is the largest of:
 - hit rate: the exact p-value (§7.1 or §7.2), the bootstrap p-value and the batch-means p-value;
 - magnitude: the bootstrap p-value and the batch-means p-value.
+
+**NOT ASSESSABLE members.** A (row, statistic) that is NOT ASSESSABLE enters the forward Holm, the opposite-direction Holm
+and any confirmation Holm with p = 1. That includes both statistics of a row with n < 1,000. A p-value computed below a
+floor is never ranked.
 
 ### 7.5 Worse than chance
 
@@ -444,22 +456,23 @@ needs at least 75,000.
 **Row figures.** A FAIL means **"no evidence of an edge at this power"**, not "no edge". So every statistic of every row
 reports two figures, and every FAIL verdict line carries both (§13).
 
-**The minimum detectable effect** at 80% power against Holm's first step:
-- **Two-sided hit rate:** by simulation for the row's own n, q, p_c and F, including the ex-post choice of constant.
-- **One-sided hit rate:** from two-proportion power at the row's called and abstained counts, using the larger of the
-  binomial and block-bootstrap standard errors.
-- **Magnitude:** (z for α₁ + 0.84) × the larger of the block-bootstrap and batch-means standard errors.
+One rule applies to both figures: wherever a standard error is used, it is **the largest of the independent-sample,
+block-bootstrap and batch-means standard errors**, matching §7.4.
 
-**A 95% upper bound on the edge,** taking the larger of an independent-sample bound and a circular-block-bootstrap bound,
-so the bound allows for dependence as the p-values do (§7.4):
-- **Two-sided hit rate:**
-  - The independent-sample bound is (h − b) + 1.96·√m/n. The 1.96 allows for the constant being chosen from the same
-    pairs.
-  - On 11.8's rows it gives 1.16 points for BTC and 1.97 for ETH, matching 11.8's 1.2 and 2.0.
+**The minimum detectable effect** at 80% power against Holm's first step:
+- **Two-sided hit rate:** by simulation for the row's own n, q, p_c and F, including the ex-post choice of constant and
+  the largest-of-three rule (§7.4).
+- **One-sided hit rate:** from two-proportion power at the row's called and abstained counts.
+- **Magnitude:** (z for α₁ + 0.84) × the standard error.
+
+**A 95% upper bound on the edge:**
+- **Two-sided hit rate:** (h − b) + 1.96 × the standard error of h − b. The independent-sample standard error is
+  √m/n, and the 1.96 allows for the constant being chosen from the same pairs. With that standard error alone, 11.8's
+  rows give 1.16 points for BTC and 1.97 for ETH, matching 11.8's 1.2 and 2.0.
 - **One-sided hit rate:** the difference in the called direction's share (up share for up-only, down share for
-  down-only), called minus abstained, plus 1.645 two-proportion standard errors. No constant is chosen here, so the
-  one-sided multiplier applies.
-- **Magnitude:** the bootstrap bound alone.
+  down-only), called minus abstained, plus 1.645 standard errors. No constant is chosen here, so the one-sided
+  multiplier applies.
+- **Magnitude:** the statistic plus 1.645 standard errors.
 
 ## 10. Coins and timeframes
 
@@ -485,7 +498,9 @@ so the bound allows for dependence as the p-values do (§7.4):
   24 hours over the span the round needs:
   - **with a trained candidate in the round:** 1,095 days before the window. That is the trainer's default span
     (`DEFAULT_WINDOW` in `app/pt_pattern_trainer.py`), as used by 11.8's three-year runs.
-  - **otherwise:** the longest registered warm-up.
+  - **otherwise:** from at least 30 days before the ranking date (the ranking span) up to the window start, and in any
+    case covering the longest registered warm-up measured in time. For SIG-A in FDS-SIG-002, that is 19 bars × 4 hours
+    = 76 hours.
 
   Where a coin fails, the next eligible coin by rank takes its place, and the replacement is recorded.
 - **Count:** the top **10** eligible coins.
@@ -607,7 +622,8 @@ including the per-pair call and return series for every row.
 - **Per statistic:**
   - its value;
   - for both tails: the exact p-value (hit rate only), the bootstrap p-value with its Monte Carlo standard error, and the
-    batch-means p-value;
+    batch-means p-value. For the two-sided hit rate, the opposite-tail figures are §7.5's, from Fisher's lower tail and
+    the §7.5 contribution;
   - the forward and opposite-direction Holm-adjusted p-values;
   - the minimum detectable effect and the 95% upper bound (§9).
 - **The magnitude conditions:** the raw mean of c × r (two-sided), the called pairs' mean return (one-sided), and the
@@ -683,11 +699,18 @@ Nothing is wired to a strategy, the trainer or paper trading by this spec.
    - At 1h, 3 months detects edges of at least about 6 points, and 1 year about 3.
    - At 4h, 1 year detects about 6.
    - A short window leaves 4h rows NOT ASSESSABLE.
-2. **Round-one candidates:** FDS-SIG-002's list cannot be registered as written.
-   - All four of its candidates are ineligible under §4. Funding, open interest and liquidations are futures data the
-     repo does not have. The taker-buy volume is in spot kline fields 9–10, but the cache drops them.
-   - Its recommended volatility target is outside round one (§3).
-   - Its section references predate this revision.
+2. **Round-one candidates:** FDS-SIG-002 names two rules, both eligible under §4 and written as §5 requires:
+   - **SIG-A:** the Chaikin Money Flow sign, 20 bars, on all 10 coins;
+   - **SIG-B:** a BTC one-bar lead on the other 9 coins.
+
+   With BTC in the top 10, F = 76 and Holm's first step is z ≥ 3.21.
+
+   Out of round one, each for its own reason:
+   - **funding rate:** it depends on the futures API, so it needs a separate data change;
+   - **open interest:** the REST API keeps only 30 days, below the 1,000-call floor;
+   - **liquidations:** the market-wide endpoint is dead and the other is signed, own-account only, so there is no
+     reliable public source;
+   - **spot taker-buy share:** it waits for a cache change.
 
 ### 15.3 Defaults this spec sets, to confirm or change before the round-one registration
 
@@ -695,14 +718,18 @@ Nothing is wired to a strategy, the trainer or paper trading by this spec.
    only, halves F and lowers the bar.
 2. **Dependence (§7.4, §9):**
    - The p-value that enters Holm is the largest of the exact, bootstrap and batch-means p-values.
-   - The block length is max(one day, 2 × the call indicators' autocorrelation time).
+   - The block length is max(one day, 2 × the call indicators' Bartlett-weighted autocorrelation time), with a maximum
+     lag of min(one month, a quarter of the series).
    - The floors are 30 blocks, m ≥ 200 and 200 abstained pairs.
+   - NOT ASSESSABLE members enter every Holm procedure with p = 1.
    - B ≥ 100 / α₁.
-   - The upper bounds take the larger of the independent-sample and block-bootstrap bounds.
+   - Every minimum detectable effect and upper bound uses the largest of the independent-sample, bootstrap and
+     batch-means standard errors.
 3. **The n floor** is 1,000 calls (§6).
 4. **Coins (§10.1):**
    - the top 10;
-   - the 1,095-day history rule when a trained candidate is registered;
+   - the history span: 1,095 days when a trained candidate is registered, otherwise at least 30 days before the ranking
+     date plus the longest warm-up in time;
    - the continuity tolerance: at most 0.1% of 1h bars missing, and no gap over 24 hours;
    - the ranking fetch within 7 days of the ranking date;
    - the extra exclusion classes, commodity-pegged and staking-derivative tokens;
@@ -742,8 +769,8 @@ Nothing is wired to a strategy, the trainer or paper trading by this spec.
    - Seeded random calls never pass.
    - Simulated no-skill data includes:
      - persistent signals (runs of 100–200 bars) over regime-drifting returns;
-     - calls drawn with a probability that drifts slowly (over weeks to a month), for both the one-sided hit test and the
-       two-sided magnitude test.
+     - calls drawn with a probability that drifts slowly (over weeks to a month), by ±0.15 and by ±0.30 around 0.5, for
+       both the one-sided hit test and the two-sided magnitude test.
    - On that data, the false-pass rate is at or below 5% per family and at or below α/F per test, within Monte Carlo
      error.
 3. **No look-ahead (tests).** With post-t bars poisoned in a fixture, every registered rule's call at t is unchanged. A
@@ -752,7 +779,7 @@ Nothing is wired to a strategy, the trainer or paper trading by this spec.
 4. **Refusals (tests).** Every refusal in §12, step 4.
 5. **Rows and floors (tests).**
    - Every registered row appears in the report with all its §13 fields.
-   - F includes NOT ASSESSABLE rows.
+   - F includes NOT ASSESSABLE rows, and every NOT ASSESSABLE (row, statistic) enters each Holm procedure with p = 1.
    - A row with at least 1,000 eligible pairs but fewer than 1,000 calls is NOT ASSESSABLE.
    - The §7.6 verdict rule, including WORSE, is applied as written.
 6. **Verdicts checked twice (test).** Holm is applied over the registered F. The generator asserts each verdict against
