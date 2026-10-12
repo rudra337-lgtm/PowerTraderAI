@@ -8,20 +8,16 @@ PowerTraderAI+ now supports **dual credential modes** for different use cases:
 
 **Recommended for local development and personal trading**
 
-1. **Run the GUI Setup Wizard:**
-   ```bash
-   cd app
-   python pt_hub.py
-   ```
+1. **Get the values** from Robinhood (see "How to Get the Values" below).
 
-2. **Navigate:** Settings → Robinhood API → Setup/Update
+2. **Navigate:** Settings → Configure Exchange APIs... → Robinhood (listed for the US
+   region only). Enter the API key and the Base64 private key, then save.
 
-3. **The wizard will:**
-   - Generate a public/private keypair
-   - Guide you through Robinhood API setup
-   - Store both values in the operating system's credential store (Windows Credential
-     Manager, macOS Keychain or the Linux Secret Service) as `robinhood:api_key` and
-     `robinhood:private_key`. No file is written.
+3. **Both values go to the operating system's credential store** (Windows Credential
+   Manager, macOS Keychain or the Linux Secret Service) as `robinhood:api_key` and
+   `robinhood:private_key`. No file is written.
+
+The Settings window no longer has its own Robinhood API row or setup wizard.
 
 ### 🚀 **CI/CD Use (Option 3): Environment Variables**
 
@@ -46,8 +42,8 @@ PowerTraderAI+ now supports **dual credential modes** for different use cases:
    - Copy the API key (starts with `rh_crypto_`)
    - Save your private key in Base64 format
 
-2. **Or use the GUI wizard first:** the wizard shows the public key; the private key is
-   only kept in the credential store, so keep your own copy if you need it for CI
+2. **Keep your own copy of the private key** if you also need it for CI: the credential
+   store does not show it again.
 
 ## ⚙️ **How It Works**
 

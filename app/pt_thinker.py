@@ -194,8 +194,8 @@ def robinhood_current_ask(symbol: str) -> float:
         credentials = get_credentials()
         if not credentials:
             raise RuntimeError(
-                "Missing encrypted API credentials. "
-                "Run the GUI and set up Robinhood API credentials in Settings."
+                "Missing Robinhood API credentials (POWERTRADER_ROBINHOOD_API_KEY / "
+                "POWERTRADER_ROBINHOOD_PRIVATE_KEY, or the OS credential store)."
             )
 
         api_key, priv_b64 = credentials
