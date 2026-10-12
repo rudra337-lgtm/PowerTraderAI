@@ -19,6 +19,13 @@ logger = logging.getLogger("pt_exchange_abstraction")
 _CREDENTIAL_KWARGS = ("api_key", "api_secret", "passphrase", "private_key")
 
 
+class MarketNotFound(RuntimeError):
+    """The exchange has no market for the symbol (e.g. Coinbase and XMR).
+
+    Unlike a network error, retrying cannot help, so callers can skip the coin
+    instead of retrying for ever."""
+
+
 class ExchangeType(Enum):
     """Supported exchange types"""
 

@@ -19,6 +19,7 @@ from pt_exchange_abstraction import (
     ConnectionTestResult,
     ExchangeType,
     MarketData,
+    MarketNotFound,
     OrderResult,
 )
 
@@ -1106,7 +1107,7 @@ class CoinbaseExchange(AbstractExchange):
         data = response.json()
         if "message" in data:
             if str(data["message"]).lower() == "notfound":
-                raise RuntimeError(
+                raise MarketNotFound(
                     f"Coinbase has no market {coinbase_symbol} (NotFound)"
                 )
             raise RuntimeError(
