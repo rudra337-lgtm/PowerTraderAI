@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -272,11 +273,58 @@ DARK_ACCENT2 = "#00E5FF"
 DARK_SELECT_BG = "#17324A"
 DARK_SELECT_FG = "#00FF66"
 
-# Status colours (coin table): idle grey, busy amber, done green; short orange.
+# Status colours (training table, live output): idle grey, busy amber, done green.
 STATUS_IDLE = DARK_MUTED
 STATUS_AMBER = "#ffa726"
 STATUS_GREEN = "#4CAF50"
+STATUS_RED = "#ff6b6b"
 LOG_SHORT = "#FF8A65"
+
+# Live-output colouring: the first rule that matches a line picks its tag.
+_LOG_LINE_RULES = (
+    ("log_state", re.compile(r"stopped from the hub")),
+    (
+        "log_error",
+        re.compile(
+            r"\bERROR\b|EXCEPTION IN|Traceback|Error in main loop|\[FAILED\]"
+            r"|EMERGENCY STOP|RISK HALT|Trading halted|ORDER (FAILED|REFUSED)"
+            r"|^\[[^\]]+\] Error |\[process exited, code -?[1-9]|\[log reader stopped"
+        ),
+    ),
+    (
+        "log_warn",
+        re.compile(
+            r"\bWARNING\b|WAITING FOR PRICE DATA|SKIPPED|Skipping [A-Z0-9]+:"
+            r"|NOT TRAINED|MODEL NOT VERIFIED|TRAINING - |skipped this pass"
+            r"|RISK (BLOCK|WARNING)|ORDER REJECTED|log lost|training data issue"
+            r"|refused|[Ff]ailed"
+        ),
+    ),
+    ("log_long", re.compile(r"\bLONG\b")),
+    ("log_short", re.compile(r"\bSHORT\b")),
+    (
+        "log_state",
+        re.compile(
+            r"\] \[(training |stopped|process exited)|Initialization complete"
+            r"|Model for |\[SUCCESS\]|SUCCESS:|Training completed|Runner starting"
+        ),
+    ),
+    (
+        "log_dim",
+        re.compile(
+            r"Processing |Completed iteration|\bWITHIN\b|\bINACTIVE\b|Epoch \d"
+            r"|^\[[A-Z0-9]+\] (=+|=== .* ===)\s*$"
+        ),
+    ),
+)
+
+
+def _log_line_tag(line: str) -> Optional[str]:
+    """The colour tag for one live-output line, or None for the default colour."""
+    for tag, rule in _LOG_LINE_RULES:
+        if rule.search(line):
+            return tag
+    return None
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
@@ -2935,6 +2983,19 @@ class PowerTraderHub(tk.Tk):
         self.trader_text.pack(side="left", fill="both", expand=True)
         trader_scroll.pack(side="right", fill="y")
 
+        # Colour lines by kind (see _log_line_tag)
+        self._live_log_bold = self._live_log_font.copy()
+        self._live_log_bold.configure(weight="bold")
+        for log_text in (self.trainer_text, self.runner_text, self.trader_text):
+            log_text.tag_configure("log_error", foreground=STATUS_RED)
+            log_text.tag_configure("log_warn", foreground=STATUS_AMBER)
+            log_text.tag_configure("log_long", foreground=STATUS_GREEN)
+            log_text.tag_configure("log_short", foreground=LOG_SHORT)
+            log_text.tag_configure(
+                "log_state", foreground=DARK_ACCENT2, font=self._live_log_bold
+            )
+            log_text.tag_configure("log_dim", foreground=DARK_MUTED)
+            log_text.tag_raise("sel")
         # Add left panes to vertical PanedWindow (enables drag sash between Controls and Live Output)
         left_split.add(top_controls, weight=0)
         left_split.add(logs_frame, weight=1)
@@ -3579,7 +3640,22 @@ class PowerTraderHub(tk.Tk):
         except Exception as exc:
             q.put(f"{prefix}[log reader stopped: {exc}]")
         finally:
-            q.put(f"{prefix}[process exited{self._exit_note(proc)}]")
+            note = self._exit_note(proc)
+            requested = getattr(self, "_stop_requested_pids", None)
+            if requested is not None and proc.pid in requested:
+                requested.discard(proc.pid)
+                note += " - stopped from the hub"
+            q.put(f"{prefix}[process exited{note}]")
+
+    def _note_stop_requested(self, proc) -> None:
+        """Remember that the hub asked ``proc`` to stop, so its exit line (code 1
+        from a terminate) says so instead of looking like a crash."""
+        try:
+            if not hasattr(self, "_stop_requested_pids"):
+                self._stop_requested_pids = set()
+            self._stop_requested_pids.add(proc.pid)
+        except Exception:
+            pass
 
     @staticmethod
     def _exit_note(proc: subprocess.Popen) -> str:
@@ -3626,6 +3702,7 @@ class PowerTraderHub(tk.Tk):
     def _stop_process(self, p: ProcInfo) -> None:
         if not p.proc or p.proc.poll() is not None:
             return
+        self._note_stop_requested(p.proc)
         try:
             p.proc.terminate()
         except Exception:
@@ -4904,7 +4981,12 @@ Platform: {sys.platform}
                 pass
         self._stop_process(self.proc_neural)
 
-    def stop_trader(self) -> None:
+    def stop_trader(self, reason: str = "stopped with the \u25a0 button") -> None:
+        if self.proc_trader.proc and self.proc_trader.proc.poll() is None:
+            try:
+                self.trader_log_q.put(f"[TRADER] [{reason}]")
+            except Exception:
+                pass
         self._stop_process(self.proc_trader)
 
     def toggle_neural_runner(self) -> None:
@@ -5163,6 +5245,7 @@ Platform: {sys.platform}
                     print(
                         f"DEBUG: Stopping trainer for {coin} (PID: {lp.info.proc.pid})"
                     )
+                    self._note_stop_requested(lp.info.proc)
                     lp.info.proc.terminate()
                     stopped_count += 1
                     # Give it a moment to terminate gracefully
@@ -5219,6 +5302,7 @@ Platform: {sys.platform}
         try:
             if lp and lp.info.proc and lp.info.proc.poll() is None:
                 print(f"DEBUG: Stopping trainer for {coin} (PID: {lp.info.proc.pid})")
+                self._note_stop_requested(lp.info.proc)
                 lp.info.proc.terminate()
                 # Give it a moment to terminate gracefully
                 try:
@@ -5851,6 +5935,7 @@ Platform: {sys.platform}
         if not lp or not lp.info.proc or lp.info.proc.poll() is not None:
             return
         try:
+            self._note_stop_requested(lp.info.proc)
             lp.info.proc.terminate()
         except Exception:
             pass
@@ -5863,7 +5948,7 @@ Platform: {sys.platform}
         self.cancel_all_auto_retrains()
 
         self.stop_neural(reason="stopped: the hub is closing")
-        self.stop_trader()
+        self.stop_trader(reason="stopped: the hub is closing")
 
         # Also reset the runner-ready gate file (best-effort)
         try:
@@ -5922,10 +6007,17 @@ Platform: {sys.platform}
         self, q: "queue.Queue[str]", txt: tk.Text, max_lines: int = 2500
     ) -> None:
         try:
+            # follow new lines only at the bottom; a tab never opened is 1 px tall
+            # and its yview is meaningless, so it follows too
+            follow = txt.winfo_height() <= 1 or txt.yview()[1] >= 0.999
+        except Exception:
+            follow = True
+        try:
             changed = False
             while True:
                 line = q.get_nowait()
-                txt.insert("end", line + "\n")
+                tag = _log_line_tag(line)
+                txt.insert("end", line + "\n", (tag,) if tag else ())
                 changed = True
         except queue.Empty:
             pass
@@ -5940,7 +6032,8 @@ Platform: {sys.platform}
                     txt.delete("1.0", f"{current - max_lines}.0")
             except Exception:
                 pass
-            txt.see("end")
+            if follow:
+                txt.see("end")
 
     def _tick(self) -> None:
         # process labels

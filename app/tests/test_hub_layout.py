@@ -1,6 +1,6 @@
 """The compact Controls pane: Account grid with the trader row, the coin table
-(training status and the runner's long/short counts) and the Controls/Live
-Output split.
+(training status and the runner's long/short counts), the Controls/Live Output
+split and coloured logs.
 
 Runs under the isolation guard (app/conftest.py); the real-hub test uses a hidden
 window and processes no events.
@@ -22,6 +22,107 @@ if APP_DIR not in sys.path:
 import pt_hub  # noqa: E402
 
 Hub = pt_hub.PowerTraderHub
+
+
+@pytest.mark.parametrize(
+    "line, tag",
+    [
+        ('[RUNNER] EXCEPTION IN (LINE 12 "x"): boom', "log_error"),
+        ("[RUNNER] Error in main loop: boom", "log_error"),
+        ("[BTC] [process exited, code 2]", "log_error"),
+        ("[RUNNER] [process exited, code 0]", "log_state"),
+        (
+            "[RUNNER] [training BTC: the runner skips BTC until its new model is saved]",
+            "log_state",
+        ),
+        ("[RUNNER] [stopped with the ■ button]", "log_state"),
+        (
+            "[RUNNER] Initialization complete. Starting main processing loop...",
+            "log_state",
+        ),
+        ("[RUNNER] ZEC  (NOT TRAINED / OUTDATED - run trainer)", "log_warn"),
+        (
+            "[RUNNER] BTC  (TRAINING - no signals until the new model is saved)",
+            "log_warn",
+        ),
+        ("[RUNNER] XRP  (WAITING FOR PRICE DATA - CoinDataError: x)", "log_warn"),
+        ("[RUNNER] LONG on 1hour timeframe. 0.5 Low Boundary: 1", "log_long"),
+        ("[RUNNER] SHORT on 4hour timeframe. -0.2 High Boundary: 2", "log_short"),
+        ("[RUNNER] WITHIN on 1day timeframe.", "log_dim"),
+        ("[RUNNER] Processing BTC...", "log_dim"),
+        ("[RUNNER] Completed iteration 4, sleeping...", "log_dim"),
+        ("[RUNNER] =========================================", "log_dim"),
+        ("[RUNNER] === BTC ===", "log_dim"),
+        ("[TRADER] Paper trader started", None),
+        # a stop the hub asked for is not a crash
+        ("[RUNNER] [process exited, code 1 - stopped from the hub]", "log_state"),
+        (
+            "[X] [process exited - log lost, the process may still be running]",
+            "log_warn",
+        ),
+        # the trader's most serious lines
+        ("[TRADER] EMERGENCY STOP: Account drawdown 21.0% exceeds 20%", "log_error"),
+        ("[TRADER] Trading halted until manual intervention", "log_error"),
+        ("[TRADER] RISK HALT: daily loss limit reached", "log_error"),
+        ("[TRADER] ORDER FAILED (BTC buy): insufficient funds", "log_error"),
+        ("[TRADER] ORDER REFUSED: live trading is not enabled", "log_error"),
+        ("[TRADER] RISK BLOCK: position limit", "log_warn"),
+        ("[TRADER] ORDER REJECTED (min notional)", "log_warn"),
+        ("[RUNNER] Error getting price from coinbase: timeout", "log_error"),
+        ("[RUNNER] INACTIVE (training data issue) on 1hour timeframe.", "log_warn"),
+        ("[RUNNER] Skipping XMR: Coinbase has no market XMR-USD", "log_warn"),
+        ("[TRADER] No holdings found. Skipping DCA levels initialization.", None),
+    ],
+)
+def test_log_lines_are_tagged_by_kind(line, tag):
+    assert pt_hub._log_line_tag(line) == tag
+
+
+class FakeText:
+    def __init__(self, at_bottom, height=200):
+        self.bottom, self.inserted, self.seen = at_bottom, [], 0
+        self.height = height
+
+    def winfo_height(self):
+        return self.height
+
+    def yview(self):
+        return (0.5, 1.0 if self.bottom else 0.6)
+
+    def insert(self, index, text, tags=()):
+        self.inserted.append((text, tags))
+
+    def index(self, _):
+        return f"{len(self.inserted) + 1}.0"
+
+    def delete(self, *_):
+        pass
+
+    def see(self, _):
+        self.seen += 1
+
+
+@pytest.mark.parametrize(
+    "at_bottom, height, follows",
+    [
+        (True, 200, 1),
+        (False, 200, 0),  # the user is reading older lines
+        (False, 1, 1),  # a tab never opened yet: still follows, opens on new lines
+    ],
+)
+def test_the_log_follows_new_lines_only_when_scrolled_to_the_bottom(
+    at_bottom, height, follows
+):
+    q = queue.Queue()
+    q.put("[RUNNER] LONG on 1hour timeframe.")
+    q.put("[RUNNER] plain line")
+    txt = FakeText(at_bottom, height)
+    Hub._drain_queue_to_text(types.SimpleNamespace(), q, txt)
+    assert txt.inserted == [
+        ("[RUNNER] LONG on 1hour timeframe.\n", ("log_long",)),
+        ("[RUNNER] plain line\n", ()),
+    ]
+    assert txt.seen == follows
 
 
 @pytest.mark.parametrize(

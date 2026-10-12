@@ -117,6 +117,33 @@ def test_the_log_shows_the_exit_code():
         assert drain(q) == ["[X] hi", f"[X] [process exited, code {code}]"]
 
 
+def test_a_stop_the_hub_asked_for_is_not_reported_as_a_crash():
+    hub = types.SimpleNamespace(_exit_note=Hub._exit_note)
+    hub._note_stop_requested = lambda proc: Hub._note_stop_requested(hub, proc)
+    q = queue.Queue()
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "raise SystemExit(1)"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    hub._note_stop_requested(proc)
+    Hub._reader_thread(hub, proc, q, "[X] ")
+    assert drain(q) == ["[X] [process exited, code 1 - stopped from the hub]"]
+    assert hub._stop_requested_pids == set()  # a reused pid is not mislabelled
+
+
+def test_stopping_the_trader_says_why():
+    hub = types.SimpleNamespace(
+        proc_trader=types.SimpleNamespace(proc=RunningProc()),
+        trader_log_q=queue.Queue(),
+        _stop_process=mock.Mock(),
+    )
+    Hub.stop_trader(hub)
+    assert drain(hub.trader_log_q) == ["[TRADER] [stopped with the ■ button]"]
+    hub._stop_process.assert_called_once_with(hub.proc_trader)
+
+
 def test_a_trained_coin_is_shown_as_trained():
     hub = types.SimpleNamespace(_is_recently_trained=lambda coin, hours_threshold: True)
     assert Hub._get_status_border_color(hub, "✅", "BTC") == pt_hub.STATUS_GREEN
@@ -251,8 +278,10 @@ def test_the_stop_button_clears_the_training_mark(tmp_path):
     hub._mark_training_ended = lambda coin, code: Hub._mark_training_ended(
         hub, coin, code
     )
+    hub._note_stop_requested = lambda proc: Hub._note_stop_requested(hub, proc)
     Hub.stop_all_trainers(hub)
     proc.terminate.assert_called_once()
+    assert hub._stop_requested_pids == {7}  # its exit line will say the hub stopped it
     assert hub.trainers == {}
     with open(status) as f:
         assert json.load(f) == {
