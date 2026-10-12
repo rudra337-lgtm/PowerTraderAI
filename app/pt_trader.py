@@ -154,6 +154,9 @@ crypto_symbols = ["BTC", "ETH", "XRP", "BNB", "DOGE"]
 main_dir = pt_paths.neural_dir()
 base_paths = {"BTC": main_dir}
 TRADE_START_LEVEL = 3
+# The neural runner rewrites its signal counts about once a minute; an older file
+# (runner stopped, or carried over from an earlier install) counts as 0.
+SIGNAL_MAX_AGE_SECONDS = 15 * 60
 START_ALLOC_PCT = 0.005
 DCA_MULTIPLIER = 2.0
 DCA_LEVELS = [-2.5, -5.0, -10.0, -20.0, -30.0, -40.0, -50.0]
@@ -879,6 +882,8 @@ class CryptoAPITrading:
         )
         path = os.path.join(folder, "long_dca_signal.txt")
         try:
+            if time.time() - os.path.getmtime(path) > SIGNAL_MAX_AGE_SECONDS:
+                return 0  # stale: the runner is not updating it
             with open(path, "r") as f:
                 raw = f.read().strip()
             val = int(float(raw))
@@ -887,13 +892,16 @@ class CryptoAPITrading:
             return 0
 
     @staticmethod
-    def _read_short_dca_signal(symbol: str) -> int:
+    def _read_short_dca_signal(symbol: str) -> Optional[int]:
         """
         Reads short_dca_signal.txt from the per-coin folder (same folder rules as trader.py).
 
         Used for:
         - Start gate: start trades at level 3+
         - DCA assist: levels 4-7 map to trader DCA stages 0-3 (trade starts at level 3 => stage 0)
+
+        A missing, stale or unreadable file returns None, which blocks a new trade
+        (the gate needs short == 0): an unknown short count is not "no shorts".
         """
         sym = str(symbol).upper().strip()
         folder = base_paths.get(
@@ -901,12 +909,14 @@ class CryptoAPITrading:
         )
         path = os.path.join(folder, "short_dca_signal.txt")
         try:
+            if time.time() - os.path.getmtime(path) > SIGNAL_MAX_AGE_SECONDS:
+                return None  # stale: the runner is not updating it
             with open(path, "r") as f:
                 raw = f.read().strip()
             val = int(float(raw))
             return val
         except Exception:
-            return 0
+            return None
 
     @staticmethod
     def _read_long_price_levels(symbol: str) -> list:
@@ -2364,6 +2374,10 @@ class CryptoAPITrading:
                 # Neural signals are used as a "permission to start" gate.
                 buy_count = self._read_long_dca_signal(base_symbol)
                 sell_count = self._read_short_dca_signal(base_symbol)
+                # The runner sets long to 0, then writes short, then long: a long
+                # count that changed while short was read means a pair mid-update.
+                if self._read_long_dca_signal(base_symbol) != buy_count:
+                    buy_count = 0
 
                 start_level = max(1, min(int(TRADE_START_LEVEL or 3), 7))
 

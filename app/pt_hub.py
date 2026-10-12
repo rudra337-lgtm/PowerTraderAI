@@ -46,7 +46,14 @@ from pt_paper_mode import (
 )
 import trainer_guard
 from strategies.settings import read_strategy_settings
-from trading_mode import TradingSettings, read_trading_settings
+from trading_mode import (
+    PaperBookError,
+    PaperBookInvalid,
+    TradingSettings,
+    paper_book_path,
+    read_paper_book,
+    read_trading_settings,
+)
 from trading_mode_ui import TradingModeDialog, TradingModeIndicator, pack_at_top
 
 # Multi-exchange imports
@@ -108,16 +115,11 @@ except ImportError:
     DEPENDENCY_CHECKER_AVAILABLE = False
     print("Warning: Dependency checker not available.")
 
-# Robinhood credentials live in the OS credential store (pt_secrets / keyring)
+# Secrets never go into gui_settings.json (pt_secrets strips them on load/save)
 try:
     import pt_secrets
-    from pt_credentials import KeyringCredentialManager
 except ImportError:
     pt_secrets = None  # type: ignore[assignment]
-    KeyringCredentialManager = None  # type: ignore[assignment]
-    print(
-        "Warning: pt_credentials not available — Robinhood credential setup disabled."
-    )
 
 # API Server imports
 try:
@@ -2680,6 +2682,9 @@ class PowerTraderHub(tk.Tk):
             activeforeground=DARK_SELECT_FG,
         )
         m_settings.add_command(label="Settings...", command=self.open_settings_dialog)
+        m_settings.add_command(
+            label="Paper Account...", command=self.open_paper_account_dialog
+        )
         menubar.add_cascade(label="Settings", menu=m_settings)
 
         # Help menu
@@ -3841,10 +3846,19 @@ class PowerTraderHub(tk.Tk):
                     time.sleep(0.05)
                     continue
                 q.put(f"{prefix}{line.rstrip()}")
-        except Exception:
-            pass
+        except Exception as exc:
+            q.put(f"{prefix}[log reader stopped: {exc}]")
         finally:
-            q.put(f"{prefix}[process exited]")
+            q.put(f"{prefix}[process exited{self._exit_note(proc)}]")
+
+    @staticmethod
+    def _exit_note(proc: subprocess.Popen) -> str:
+        """', code N' once the process has ended, else a note that it still runs."""
+        try:
+            code = proc.wait(timeout=2)
+        except Exception:
+            return " - log lost, the process may still be running"
+        return f", code {code}"
 
     def _start_process(
         self, p: ProcInfo, log_q: Optional["queue.Queue[str]"] = None, prefix: str = ""
@@ -5152,7 +5166,12 @@ Platform: {sys.platform}
             self.proc_trader, log_q=self.trader_log_q, prefix="[TRADER] "
         )
 
-    def stop_neural(self) -> None:
+    def stop_neural(self, reason: str = "stopped with the ■ button") -> None:
+        if self.proc_neural.proc and self.proc_neural.proc.poll() is None:
+            try:
+                self.runner_log_q.put(f"[RUNNER] [{reason}]")
+            except Exception:
+                pass
         self._stop_process(self.proc_neural)
 
     def stop_trader(self) -> None:
@@ -5512,10 +5531,19 @@ Platform: {sys.platform}
         print(f"DEBUG: start_trainer_for_selected_coin() completed")
 
     def train_all_coins(self) -> None:
-        # Start trainers for every coin (in parallel)
-        print(f"DEBUG: Starting training for coins: {self.coins}")
         if not self._trainer_launch_allowed("all coins"):
             return  # one refusal message, not one per coin
+        trained = [c for c in self.coins if self._coin_is_trained(c)]
+        if trained and not messagebox.askyesno(
+            "Train all coins?",
+            f"Train all {len(self.coins)} coins now?\n\n"
+            f"This deletes the current models of {', '.join(trained)}. The runner "
+            "skips each coin until its new model is saved.",
+            parent=self,
+        ):
+            return
+        # Start trainers for every coin (in parallel)
+        print(f"DEBUG: Starting training for coins: {self.coins}")
         for c in self.coins:
             print(f"DEBUG: Training coin: {c}")
             self.trainer_coin_var.set(c)
@@ -5545,6 +5573,7 @@ Platform: {sys.platform}
                     print(f"DEBUG: Trainer for {coin} already stopped")
             except Exception as e:
                 print(f"DEBUG: Error stopping trainer for {coin}: {e}")
+            self._mark_training_ended(coin, self._exit_code(lp))
 
         # Clear the trainers dictionary
         self.trainers.clear()
@@ -5596,6 +5625,7 @@ Platform: {sys.platform}
                     print(f"DEBUG: Force killing trainer for {coin}")
                     lp.info.proc.kill()
 
+                self._mark_training_ended(coin, self._exit_code(lp))
                 # Remove from trainers dictionary
                 del self.trainers[coin]
 
@@ -5647,14 +5677,12 @@ Platform: {sys.platform}
             print(f"DEBUG: No coin in trainer_coin_var, returning")
             return
 
-        # A mock trainer is refused before anything is stopped or deleted (FDS-MDL).
+        # A mock trainer is refused before anything is deleted (FDS-MDL).
         if not self._trainer_launch_allowed(coin):
             return
 
-        print(f"DEBUG: About to stop neural runner before training {coin}")
-        # Stop the Neural Runner before any training starts (training modifies artifacts the runner reads)
-        self.stop_neural()
-        print(f"DEBUG: Neural runner stopped, continuing with training setup")
+        # The Neural Runner keeps running: removing the coin's training stamp
+        # (below) makes it skip this coin until the new model is complete.
 
         # --- IMPORTANT ---
         # Match the trader's folder convention:
@@ -5697,13 +5725,25 @@ Platform: {sys.platform}
             ]
 
             deleted = 0
+            deadline = time.time() + 1.0
             for pat in patterns:
                 for fp in glob.glob(os.path.join(coin_cwd, pat)):
-                    try:
-                        os.remove(fp)
-                        deleted += 1
-                    except Exception:
-                        pass
+                    while True:
+                        try:
+                            os.remove(fp)
+                            deleted += 1
+                            break
+                        except FileNotFoundError:
+                            break
+                        except OSError as exc:
+                            # 32: open in another process (e.g. the runner reading it)
+                            if getattr(exc, "winerror", None) != 32:
+                                break
+                            if time.time() >= deadline:
+                                break
+                            time.sleep(0.05)
+            # the coin is untrained until the new run finishes, here as in the runner
+            getattr(self, "last_training_times", {}).pop(coin, None)
 
             if deleted:
                 try:
@@ -5743,20 +5783,8 @@ Platform: {sys.platform}
                 bufsize=1,
             )
             print(f"DEBUG: Process started with PID: {info.proc.pid}")
-            # Give it a moment to start and check if it's still running
-            time.sleep(0.5)
-            if info.proc.poll() is not None:
-                print(
-                    f"DEBUG: Process {info.proc.pid} already terminated with exit code: {info.proc.returncode}"
-                )
-                try:
-                    stdout, stderr = info.proc.communicate(timeout=1)
-                    print(f"DEBUG: Process output: {stdout}")
-                    if stderr:
-                        print(f"DEBUG: Process stderr: {stderr}")
-                except (TimeoutError, OSError):
-                    pass
-                return  # Don't register a failed process
+            # A trainer that stops at once (e.g. exit 2: its folder still holds
+            # model files) is kept too, so its output and exit code reach the log.
 
             t = threading.Thread(
                 target=self._reader_thread,
@@ -5768,6 +5796,11 @@ Platform: {sys.platform}
             self.trainers[coin] = LogProc(
                 info=info, log_q=q, thread=t, is_trainer=True, coin=coin
             )
+            if self.proc_neural.proc and self.proc_neural.proc.poll() is None:
+                self.runner_log_q.put(
+                    f"[RUNNER] [training {coin}: the runner skips {coin} until "
+                    "its new model is saved]"
+                )
 
             # Add periodic monitoring to see when process exits
             self.after(1000, lambda c=coin: self._monitor_trainer_process(c))
@@ -5775,6 +5808,33 @@ Platform: {sys.platform}
             messagebox.showerror(
                 "Failed to start", f"Trainer for {coin} failed to start:\n{e}"
             )
+
+    @staticmethod
+    def _exit_code(lp):
+        """A stopped trainer's exit code, once it has ended (None if unknown)."""
+        try:
+            return lp.info.proc.wait(timeout=2)
+        except Exception:
+            return None
+
+    def _mark_training_ended(self, coin: str, code) -> None:
+        """A stopped or crashed trainer can leave trainer_status.json at TRAINING;
+        record how it ended so neither the hub nor the runner waits on it."""
+        path = os.path.join(self.coin_folders.get(coin, ""), "trainer_status.json")
+        try:
+            st = _safe_read_json(path)
+            if isinstance(st, dict) and str(st.get("state", "")).upper() == "TRAINING":
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "state": "STOPPED",
+                            "exit_code": code,
+                            "timestamp": time.time(),
+                        },
+                        f,
+                    )
+        except Exception:
+            pass
 
     def _monitor_trainer_process(self, coin: str) -> None:
         """Monitor a specific trainer process and log when it exits"""
@@ -5795,6 +5855,8 @@ Platform: {sys.platform}
                         )
                         # Schedule auto-retrain if enabled
                         self._schedule_auto_retrain(coin)
+                    else:
+                        self._mark_training_ended(coin, proc.returncode)
 
                     # Try to get any remaining output
                     try:
@@ -6044,7 +6106,7 @@ Platform: {sys.platform}
 
     def _get_status_border_color(self, status: str, coin: str = None) -> str:
         """Get border color based on training status and recency"""
-        if status == "✓":
+        if status in ("✅", "✓"):  # _training_status_map marks trained coins ✅
             # Check if training was recent (within last 2 hours = fresh green)
             if coin and self._is_recently_trained(coin, hours_threshold=2):
                 return "#4CAF50"  # Bright green for recently completed
@@ -6099,12 +6161,31 @@ Platform: {sys.platform}
                 is_running = self._is_trainer_running(coin_name)
 
                 if is_running:
+                    if not messagebox.askyesno(
+                        f"Stop training {coin_name}?",
+                        f"{coin_name} is training. Stop it now?\n\n"
+                        f"{coin_name} stays untrained until it is trained again.",
+                        parent=self,
+                    ):
+                        return
                     # Stop training if running
                     print(f"DEBUG: Stopping training for {coin_name}")
                     self.trainer_coin_var.set(coin_name)
                     self.stop_trainer_for_selected_coin()
                     print(f"DEBUG: Training stopped for {coin_name}")
                 else:
+                    if not self._trainer_launch_allowed(coin_name):
+                        return
+                    if self._coin_is_trained(coin_name) and not messagebox.askyesno(
+                        f"Retrain {coin_name}?",
+                        f"{coin_name} is already trained "
+                        f"({self._get_training_hours(coin_name)} ago).\n\n"
+                        f"Retraining deletes its current model files. The runner "
+                        f"skips {coin_name} until the new model is saved.\n\n"
+                        "Retrain now?",
+                        parent=self,
+                    ):
+                        return
                     # Start training if not running
                     print(f"DEBUG: Starting training for {coin_name}")
                     # Set the dropdown to this coin
@@ -6187,7 +6268,7 @@ Platform: {sys.platform}
         """Cancel all scheduled auto-retraining timers."""
         for coin, timer_id in self.auto_retrain_timers.items():
             try:
-                self.master.after_cancel(timer_id)
+                self.after_cancel(timer_id)  # the hub is the Tk root: no .master
                 print(f"DEBUG: Cancelled auto-retrain timer for {coin}")
             except Exception:
                 pass
@@ -6210,7 +6291,7 @@ Platform: {sys.platform}
         # Cancel all auto-retrain timers
         self.cancel_all_auto_retrains()
 
-        self.stop_neural()
+        self.stop_neural(reason="stopped: the hub is closing")
         self.stop_trader()
 
         # Also reset the runner-ready gate file (best-effort)
@@ -6566,18 +6647,94 @@ Platform: {sys.platform}
             fresh = False
         indicator.update_price_integrity(self._price_note_data if fresh else None)
 
+    def _shown_paper_book_path(self) -> Optional[str]:
+        """The paper book, when this hub shows the paper trader's books (paper
+        mode at start-up); else None."""
+        status_dir = os.path.dirname(getattr(self, "trader_status_path", "") or "")
+        hub_dir = getattr(self, "hub_dir", None)
+        if not hub_dir:
+            return None
+        paper_dir = os.path.join(hub_dir, "paper")
+        if os.path.normcase(os.path.abspath(status_dir)) != os.path.normcase(
+            os.path.abspath(paper_dir)
+        ):
+            return None
+        return paper_book_path(hub_dir)
+
+    @staticmethod
+    def _paper_book_status(book_path: str) -> Optional[dict]:
+        """The Account panel's figures from the saved paper book: cash as buying
+        power, positions at cost (the book holds no live prices). None when the
+        book is missing or unreadable."""
+        try:
+            book = read_paper_book(book_path)
+            if book is None:
+                return None
+            cash = book.cash_balance
+            held = sum(
+                (qty * price for qty, price in book.positions.values()), Decimal(0)
+            )
+        except PaperBookInvalid:
+            # the trader loads an invalid-but-parsable book as written
+            try:
+                with open(book_path, "r", encoding="utf-8") as f:
+                    state = json.load(f)
+                cash = Decimal(state["cash_balance"])
+                held = sum(
+                    (
+                        Decimal(p["quantity"]) * Decimal(p["average_price"])
+                        for p in (state.get("positions") or {}).values()
+                    ),
+                    Decimal(0),
+                )
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                AttributeError,
+                ArithmeticError,
+            ):
+                return None
+        except PaperBookError:  # unreadable: the trader starts a fresh book
+            return None
+        total = cash + held
+        return {
+            "source": "paper_book",
+            "account": {
+                "total_account_value": float(total),
+                "buying_power": float(cash),
+                "holdings_sell_value": float(held),
+                "holdings_buy_value": float(held),
+                "percent_in_trade": float(held / total * 100) if total > 0 else 0.0,
+            },
+            "positions": {},
+        }
+
     def _refresh_trader_status(self) -> None:
         # mtime cache: rebuilding the whole tree every tick is expensive with many rows
         try:
             mtime = os.path.getmtime(self.trader_status_path)
         except Exception:
             mtime = None
+        # The saved paper book counts too: after it is edited (Settings > Paper
+        # Account) and until the trader reports again, the panel shows the book.
+        book_path = self._shown_paper_book_path()
+        try:
+            book_mtime = os.path.getmtime(book_path) if book_path else None
+        except OSError:
+            book_mtime = None
 
-        if getattr(self, "_last_trader_status_mtime", object()) == mtime:
+        key = (mtime, book_mtime)
+        if getattr(self, "_last_trader_status_mtime", object()) == key:
             return
-        self._last_trader_status_mtime = mtime
+        self._last_trader_status_mtime = key
 
         data = _safe_read_json(self.trader_status_path)
+        if book_mtime is not None and (mtime is None or book_mtime > mtime):
+            book_data = self._paper_book_status(book_path)
+            if book_data is not None:
+                data = book_data
         if not data:
             # account summary (right-side status area)
             try:
@@ -6607,8 +6764,10 @@ Platform: {sys.platform}
 
             self._last_total_account_value = total_val
 
+            from_book = data.get("source") == "paper_book"
             self.lbl_acct_total_value.config(
                 text=f"Total Account Value: {_fmt_money(acct.get('total_account_value', None))}"
+                + (" (saved paper account)" if from_book else "")
             )
             self.lbl_acct_holdings_value.config(
                 text=f"Holdings Value: {_fmt_money(acct.get('holdings_sell_value', None))}"
@@ -7366,6 +7525,67 @@ Platform: {sys.platform}
         # Restore selection
         self._show_chart_page(selected)
 
+    # ---- paper account (the paper trader's book) ----
+
+    def _paper_trader_running_reason(self) -> Optional[str]:
+        """Why the paper book must not be saved now, or None.
+
+        A running trader never reloads the book and saves over it after every
+        order, so an edit made while it runs would be lost. Checked at the moment
+        of saving."""
+        proc = getattr(getattr(self, "proc_trader", None), "proc", None)
+        if (proc is not None and proc.poll() is None) or getattr(
+            self, "_auto_start_trader_pending", False
+        ):
+            return (
+                "The trader is running (or about to start), and it would overwrite "
+                "these values. Stop it with the ■ (Stop trader) button in the "
+                "Trading section, then save here; this window can stay open."
+            )
+        if proc is None:
+            # Not started by this hub: a trader started elsewhere is seen only by a
+            # fresh paper status file (the hub's 2-minute freshness rule).
+            status = _safe_read_json(
+                os.path.join(
+                    getattr(self, "hub_dir", ""), "paper", "trader_status.json"
+                )
+            )
+            if not isinstance(status, dict):
+                status = {}
+            try:
+                age = time.time() - float(status.get("timestamp"))
+            except (TypeError, ValueError):
+                age = None
+            if age is not None and 0 <= age <= 120.0:
+                return (
+                    "A paper trader updated its status less than 2 minutes ago, so "
+                    "it may still be running outside this window. Stop it (or wait "
+                    "2 minutes if it has stopped), then save."
+                )
+        return None
+
+    def open_paper_account_dialog(self, parent=None):
+        """Settings > Paper Account: the starting balance, cash and positions the
+        paper trader starts from (``<hub>/paper/paper_account.json``)."""
+        try:
+            from paper_account_ui import PaperAccountDialog
+
+            paper_mode = bool(getattr(self, "_paper_mode", True))
+            return PaperAccountDialog(
+                parent or self,
+                hub_dir=self.hub_dir,
+                trader_running=self._paper_trader_running_reason,
+                known_coins=getattr(self, "coins", ()) or (),
+                palette=get_palette(paper_mode),
+                live=not paper_mode,
+                on_saved=self._refresh_trader_status,
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "Paper Account", f"Could not open the paper account: {e}"
+            )
+            return None
+
     # ---- settings dialog ----
 
     def open_settings_dialog(self) -> None:
@@ -7754,6 +7974,17 @@ Platform: {sys.platform}
         ttk.Label(frm, text="").grid(row=r, column=2, sticky="e", padx=(10, 0), pady=6)
         r += 1
 
+        # Paper account: the paper trader's book (balances and positions)
+        ttk.Button(
+            frm,
+            text="Paper Account...",
+            command=lambda: self.open_paper_account_dialog(win),
+        ).grid(row=r, column=0, columnspan=2, sticky="w", pady=6)
+        ttk.Label(
+            frm, text="starting balance, cash and positions for paper trading"
+        ).grid(row=r, column=2, sticky="e", padx=(10, 0), pady=6)
+        r += 1
+
         ttk.Separator(frm, orient="horizontal").grid(
             row=r, column=0, columnspan=3, sticky="ew", pady=10
         )
@@ -7765,641 +7996,6 @@ Platform: {sys.platform}
         r += 1
         add_row(r, "pt_trader.py path:", trader_script_var)
         r += 1
-
-        # --- Robinhood API setup (OS credential store via pt_secrets; no files) ---
-        def _read_saved_credentials() -> Tuple[str, str]:
-            """Saved Robinhood (api_key, private_key_b64): environment variables
-            first, then the OS keyring. ("", "") when none."""
-            if KeyringCredentialManager is None:
-                return "", ""
-            creds = KeyringCredentialManager().decrypt_credentials()
-            return (creds[0], creds[1]) if creds else ("", "")
-
-        api_status_var = tk.StringVar(value="")
-
-        def _refresh_api_status() -> None:
-            k, s = _read_saved_credentials()
-            if not (k and s):
-                api_status_var.set("Not configured ❌ (no API key / private key saved)")
-                return
-            source = pt_secrets.credential_source("robinhood") if pt_secrets else None
-            where = (
-                "environment variables"
-                if source == pt_secrets.SOURCE_ENV
-                else "OS credential store"
-            )
-            api_status_var.set(f"Configured ✅ (from {where})")
-
-        def _clear_api_files() -> None:
-            """Remove the Robinhood credentials from the OS keyring (with a confirmation)."""
-            if KeyringCredentialManager is None:
-                return
-            if not messagebox.askyesno(
-                "Delete API credentials?",
-                "This removes your Robinhood API key and private key from the "
-                "operating system's credential store.\n\n"
-                "After deleting, the trader can NOT authenticate until you run the setup wizard again.\n\n"
-                "Are you sure?",
-            ):
-                return
-
-            KeyringCredentialManager().delete_credentials()
-            _refresh_api_status()
-            note = ""
-            if (
-                pt_secrets
-                and pt_secrets.credential_source("robinhood") == pt_secrets.SOURCE_ENV
-            ):
-                note = (
-                    "\n\nPOWERTRADER_ROBINHOOD_API_KEY / _PRIVATE_KEY are still set in the "
-                    "environment and will keep being used until you unset them."
-                )
-            messagebox.showinfo("Deleted", "Robinhood credentials removed." + note)
-
-        def _open_robinhood_api_wizard() -> None:
-            """
-            Beginner-friendly wizard that creates + stores Robinhood Crypto Trading API credentials.
-
-            Both values go to the operating system's credential store (Windows
-            Credential Manager / macOS Keychain / Secret Service) through
-            pt_secrets. Nothing is written to a file.
-            """
-            import base64
-            import platform
-            import time
-            import webbrowser
-            from datetime import datetime
-
-            # Friendly dependency errors (laymen-proof)
-            try:
-                from cryptography.hazmat.primitives import serialization
-                from cryptography.hazmat.primitives.asymmetric import ed25519
-            except Exception:
-                messagebox.showerror(
-                    "Missing dependency",
-                    "The 'cryptography' package is required for Robinhood API setup.\n\n"
-                    "Fix: open a Command Prompt / Terminal in this folder and run:\n"
-                    "  pip install cryptography\n\n"
-                    "Then re-open this Setup Wizard.",
-                )
-                return
-
-            try:
-                import requests  # for the 'Test credentials' button
-            except Exception:
-                requests = None
-
-            wiz = tk.Toplevel(win)
-            wiz.title("Robinhood API Setup")
-            # Big enough to show the bottom buttons, but still scrolls if the window is resized smaller.
-            wiz.geometry("980x720")
-            wiz.minsize(860, 620)
-            wiz.configure(bg=DARK_BG)
-
-            # Scrollable content area (same pattern as the Neural Levels scrollbar).
-            viewport = ttk.Frame(wiz)
-            viewport.pack(fill="both", expand=True, padx=12, pady=12)
-            viewport.grid_rowconfigure(0, weight=1)
-            viewport.grid_columnconfigure(0, weight=1)
-
-            wiz_canvas = tk.Canvas(
-                viewport,
-                bg=DARK_BG,
-                highlightthickness=1,
-                highlightbackground=DARK_BORDER,
-                bd=0,
-            )
-            wiz_canvas.grid(row=0, column=0, sticky="nsew")
-
-            wiz_scroll = ttk.Scrollbar(
-                viewport, orient="vertical", command=wiz_canvas.yview
-            )
-            wiz_scroll.grid(row=0, column=1, sticky="ns")
-            wiz_canvas.configure(yscrollcommand=wiz_scroll.set)
-
-            container = ttk.Frame(wiz_canvas)
-            wiz_window = wiz_canvas.create_window((0, 0), window=container, anchor="nw")
-            container.columnconfigure(0, weight=1)
-
-            def _update_wiz_scrollbars(event=None) -> None:
-                """Update scrollregion + hide/show the scrollbar depending on overflow."""
-                try:
-                    c = wiz_canvas
-                    win_id = wiz_window
-
-                    c.update_idletasks()
-                    bbox = c.bbox(win_id)
-                    if not bbox:
-                        wiz_scroll.grid_remove()
-                        return
-
-                    c.configure(scrollregion=bbox)
-                    content_h = int(bbox[3] - bbox[1])
-                    view_h = int(c.winfo_height())
-
-                    if content_h > (view_h + 1):
-                        wiz_scroll.grid()
-                    else:
-                        wiz_scroll.grid_remove()
-                        try:
-                            c.yview_moveto(0)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-            def _on_wiz_canvas_configure(e) -> None:
-                # Keep the inner frame exactly the canvas width so labels wrap nicely.
-                try:
-                    wiz_canvas.itemconfigure(wiz_window, width=int(e.width))
-                except Exception:
-                    pass
-                _update_wiz_scrollbars()
-
-            wiz_canvas.bind("<Configure>", _on_wiz_canvas_configure, add="+")
-            container.bind("<Configure>", _update_wiz_scrollbars, add="+")
-
-            def _wheel(e):
-                try:
-                    if wiz_scroll.winfo_ismapped():
-                        wiz_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-                except Exception:
-                    pass
-
-            wiz_canvas.bind("<Enter>", lambda _e: wiz_canvas.focus_set(), add="+")
-            wiz_canvas.bind("<MouseWheel>", _wheel, add="+")  # Windows / Mac
-            wiz_canvas.bind(
-                "<Button-4>", lambda _e: wiz_canvas.yview_scroll(-3, "units"), add="+"
-            )  # Linux
-            wiz_canvas.bind(
-                "<Button-5>", lambda _e: wiz_canvas.yview_scroll(3, "units"), add="+"
-            )  # Linux
-
-            # Load any existing credentials so users can update without re-generating
-            # keys. The private key stays in memory only; it is never shown.
-            existing_api_key, existing_private_b64 = _read_saved_credentials()
-            private_b64_state = {"value": (existing_private_b64 or "").strip()}
-
-            def _validate_api_key(api_key: str) -> Tuple[bool, str]:
-                """Enhanced API key validation with user-friendly feedback."""
-                if not api_key:
-                    return False, "API key is required"
-                if len(api_key) < 10:
-                    return (
-                        False,
-                        "API key looks unusually short. Please verify you copied the complete key from Robinhood.",
-                    )
-                if not api_key.startswith("rh."):
-                    return (
-                        False,
-                        "Robinhood API keys typically start with 'rh.' - please verify this is the correct key.",
-                    )
-                return True, "API key format looks correct"
-
-            # -----------------------------
-            # Helpers
-            # -----------------------------
-            def _copy_to_clipboard(txt: str, title: str = "Copied") -> None:
-                try:
-                    wiz.clipboard_clear()
-                    wiz.clipboard_append(txt)
-                    messagebox.showinfo(title, "Copied to clipboard.")
-                except Exception:
-                    pass
-
-            # -----------------------------
-            # Big, beginner-friendly instructions
-            # -----------------------------
-            intro = (
-                "This trader uses Robinhood's Crypto Trading API credentials.\n\n"
-                "You only do this once. When finished, pt_trader.py can authenticate automatically.\n\n"
-                "✅ What you will do in this window:\n"
-                "  1) Generate a Public Key + Private Key (Ed25519).\n"
-                "  2) Copy the PUBLIC key and paste it into Robinhood to create an API credential.\n"
-                "  3) Robinhood will show you an API Key (usually starts with 'rh...'). Copy it.\n"
-                "  4) Paste that API Key back here and click Save.\n\n"
-                "🧭 EXACTLY where to paste the Public Key on Robinhood (desktop web is best):\n"
-                "  A) Log in to Robinhood on a computer.\n"
-                "  B) Click Account (top-right) → Settings.\n"
-                "  C) Click Crypto.\n"
-                "  D) Scroll down to API Trading and click + Add Key (or Add key).\n"
-                "  E) Paste the Public Key into the Public key field.\n"
-                "  F) Give it any name (example: PowerTrader).\n"
-                "  G) Permissions: this TRADER needs READ + TRADE. (READ-only cannot place orders.)\n"
-                "  H) Click Save. Robinhood shows your API Key — copy it right away (it may only show once).\n\n"
-                "📱 Mobile note: if you can't find API Trading in the app, use robinhood.com in a browser.\n\n"
-                "When you click Save, both your API Key and your PRIVATE key are stored in your\n"
-                "operating system's credential store (Windows Credential Manager, macOS Keychain\n"
-                "or the Linux Secret Service). Nothing is written to a file.\n"
-            )
-
-            intro_lbl = ttk.Label(container, text=intro, justify="left")
-            intro_lbl.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-
-            top_btns = ttk.Frame(container)
-            top_btns.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-            top_btns.columnconfigure(0, weight=1)
-
-            def open_robinhood_page():
-                # Robinhood entry point. User will still need to click into Settings → Crypto → API Trading.
-                webbrowser.open("https://robinhood.com/account/crypto")
-
-            ttk.Button(
-                top_btns,
-                text="Open Robinhood API Credentials page (Crypto)",
-                command=open_robinhood_page,
-            ).pack(side="left")
-            ttk.Button(
-                top_btns,
-                text="Open Robinhood Crypto Trading API docs",
-                command=lambda: webbrowser.open(
-                    "https://docs.robinhood.com/crypto/trading/"
-                ),
-            ).pack(side="left", padx=8)
-
-            # -----------------------------
-            # Step 1 — Generate keys
-            # -----------------------------
-            step1 = ttk.LabelFrame(
-                container, text="Step 1 — Generate your keys (click once)"
-            )
-            step1.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
-            step1.columnconfigure(0, weight=1)
-
-            ttk.Label(
-                step1, text="Public Key (this is what you paste into Robinhood):"
-            ).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 0))
-
-            pub_box = tk.Text(step1, height=4, wrap="none")
-            pub_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=(6, 10))
-            pub_box.configure(bg=DARK_PANEL, fg=DARK_FG, insertbackground=DARK_FG)
-
-            def _render_public_from_private_b64(priv_b64: str) -> str:
-                """Return Robinhood-compatible Public Key: base64(raw_ed25519_public_key_32_bytes)."""
-                try:
-                    raw = base64.b64decode(priv_b64)
-
-                    # Accept either:
-                    #   - 32 bytes: Ed25519 seed
-                    #   - 64 bytes: NaCl/tweetnacl secretKey (seed + public)
-                    if len(raw) == 64:
-                        seed = raw[:32]
-                    elif len(raw) == 32:
-                        seed = raw
-                    else:
-                        return ""
-
-                    pk = ed25519.Ed25519PrivateKey.from_private_bytes(seed)
-                    pub_raw = pk.public_key().public_bytes(
-                        encoding=serialization.Encoding.Raw,
-                        format=serialization.PublicFormat.Raw,
-                    )
-                    return base64.b64encode(pub_raw).decode("utf-8")
-                except Exception:
-                    return ""
-
-            def _set_pub_text(txt: str) -> None:
-                try:
-                    pub_box.delete("1.0", "end")
-                    pub_box.insert("1.0", txt or "")
-                except Exception:
-                    pass
-
-            # If already configured before, show the public key again (derived from stored private key)
-            if private_b64_state["value"]:
-                _set_pub_text(
-                    _render_public_from_private_b64(private_b64_state["value"])
-                )
-
-            def generate_keys():
-                # Generate an Ed25519 keypair (Robinhood expects base64 raw public key bytes)
-                priv = ed25519.Ed25519PrivateKey.generate()
-                pub = priv.public_key()
-
-                seed = priv.private_bytes(
-                    encoding=serialization.Encoding.Raw,
-                    format=serialization.PrivateFormat.Raw,
-                    encryption_algorithm=serialization.NoEncryption(),
-                )
-                pub_raw = pub.public_bytes(
-                    encoding=serialization.Encoding.Raw,
-                    format=serialization.PublicFormat.Raw,
-                )
-
-                # Store PRIVATE key as base64(seed32) because pt_thinker.py uses nacl.signing.SigningKey(seed)
-                # and it requires exactly 32 bytes.
-                private_b64_state["value"] = base64.b64encode(seed).decode("utf-8")
-
-                # Show what you paste into Robinhood: base64(raw public key)
-                _set_pub_text(base64.b64encode(pub_raw).decode("utf-8"))
-
-                messagebox.showinfo(
-                    "Step 1 complete",
-                    "Public/Private keys generated.\n\n"
-                    "Next (Robinhood):\n"
-                    "  1) Click 'Copy Public Key' in this window\n"
-                    "  2) On Robinhood (desktop web): Account → Settings → Crypto\n"
-                    "  3) Scroll to 'API Trading' → click '+ Add Key'\n"
-                    "  4) Paste the Public Key (base64) into the 'Public key' field\n"
-                    "  5) Enable permissions READ + TRADE (this trader needs both), then Save\n"
-                    "  6) Robinhood shows an API Key (usually starts with 'rh...') — copy it right away\n\n"
-                    "Then come back here and paste that API Key into the 'API Key' box.",
-                )
-
-            def copy_public_key():
-                txt = (pub_box.get("1.0", "end") or "").strip()
-                if not txt:
-                    messagebox.showwarning(
-                        "Nothing to copy", "Click 'Generate Keys' first."
-                    )
-                    return
-                _copy_to_clipboard(txt, title="Public Key copied")
-
-            step1_btns = ttk.Frame(step1)
-            step1_btns.grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
-            ttk.Button(step1_btns, text="Generate Keys", command=generate_keys).pack(
-                side="left"
-            )
-            ttk.Button(
-                step1_btns, text="Copy Public Key", command=copy_public_key
-            ).pack(side="left", padx=8)
-
-            # -----------------------------
-            # Step 2 — Paste API key (from Robinhood)
-            # -----------------------------
-            step2 = ttk.LabelFrame(
-                container, text="Step 2 — Paste your Robinhood API Key here"
-            )
-            step2.grid(row=3, column=0, sticky="nsew", pady=(0, 10))
-            step2.columnconfigure(0, weight=1)
-
-            step2_help = (
-                "In Robinhood, after you add the Public Key, Robinhood will show an API Key.\n"
-                "Paste that API Key below. (It often starts with 'rh.'.)"
-            )
-            ttk.Label(step2, text=step2_help, justify="left").grid(
-                row=0, column=0, sticky="w", padx=10, pady=(8, 0)
-            )
-
-            api_key_var = tk.StringVar(value=existing_api_key or "")
-            api_ent = ttk.Entry(step2, textvariable=api_key_var)
-            api_ent.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 10))
-
-            def _test_credentials() -> None:
-                api_key = (api_key_var.get() or "").strip()
-                priv_b64 = (private_b64_state.get("value") or "").strip()
-
-                if not requests:
-                    messagebox.showerror(
-                        "Missing dependency",
-                        "The 'requests' package is required for the Test button.\n\n"
-                        "Fix: pip install requests\n\n"
-                        "(You can still Save without testing.)",
-                    )
-                    return
-
-                if not priv_b64:
-                    messagebox.showerror(
-                        "Missing private key", "Step 1: click 'Generate Keys' first."
-                    )
-                    return
-                if not api_key:
-                    messagebox.showerror(
-                        "Missing API key",
-                        "Paste the API key from Robinhood into Step 2 first.",
-                    )
-                    return
-
-                # Enhanced API key validation with user-friendly feedback
-                if len(api_key) < 10:
-                    if not messagebox.askyesno(
-                        "API key validation",
-                        "That API key looks unusually short. Robinhood API keys are typically longer.\n\n"
-                        "Are you sure you pasted the complete API Key from Robinhood?",
-                        icon="warning",
-                    ):
-                        return
-
-                # Safe test: market-data endpoint (no trading)
-                base_url = "https://trading.robinhood.com"
-                path = "/api/v1/crypto/marketdata/best_bid_ask/?symbol=BTC-USD"
-                method = "GET"
-                body = ""
-                ts = int(time.time())
-                msg = f"{api_key}{ts}{path}{method}{body}".encode("utf-8")
-
-                try:
-                    raw = base64.b64decode(priv_b64)
-
-                    # Accept either:
-                    #   - 32 bytes: Ed25519 seed
-                    #   - 64 bytes: NaCl/tweetnacl secretKey (seed + public)
-                    if len(raw) == 64:
-                        seed = raw[:32]
-                    elif len(raw) == 32:
-                        seed = raw
-                    else:
-                        raise ValueError(
-                            f"Unexpected private key length: {len(raw)} bytes (expected 32 or 64)"
-                        )
-
-                    pk = ed25519.Ed25519PrivateKey.from_private_bytes(seed)
-                    sig_b64 = base64.b64encode(pk.sign(msg)).decode("utf-8")
-                except Exception as e:
-                    messagebox.showerror(
-                        "Bad private key",
-                        f"Couldn't use your private key.\n\nError:\n{e}",
-                    )
-                    return
-
-                headers = {
-                    "x-api-key": api_key,
-                    "x-timestamp": str(ts),
-                    "x-signature": sig_b64,
-                    "Content-Type": "application/json",
-                }
-
-                try:
-                    resp = requests.get(
-                        f"{base_url}{path}", headers=headers, timeout=10
-                    )
-                    if resp.status_code >= 400:
-                        # Give layman-friendly hints for common failures
-                        hint = ""
-                        if resp.status_code in (401, 403):
-                            hint = (
-                                "\n\nCommon fixes:\n"
-                                "  • Make sure you pasted the API Key (not the public key).\n"
-                                "  • In Robinhood, ensure the key has permissions READ + TRADE.\n"
-                                "  • If you just created the key, wait 30–60 seconds and try again.\n"
-                            )
-                        messagebox.showerror(
-                            "Test failed",
-                            f"Robinhood returned HTTP {resp.status_code}.\n\n{resp.text}{hint}",
-                        )
-                        return
-
-                    data = resp.json()
-                    # Try to show something reassuring
-                    ask = None
-                    try:
-                        if data.get("results"):
-                            ask = data["results"][0].get("ask_inclusive_of_buy_spread")
-                    except Exception:
-                        pass
-
-                    messagebox.showinfo(
-                        "Test successful",
-                        "✅ Your API Key + Private Key worked!\n\n"
-                        "Robinhood responded successfully.\n"
-                        f"BTC-USD ask (example): {ask if ask is not None else 'received'}\n\n"
-                        "Next: click Save.",
-                    )
-                except Exception as e:
-                    messagebox.showerror(
-                        "Test failed", f"Couldn't reach Robinhood.\n\nError:\n{e}"
-                    )
-
-            step2_btns = ttk.Frame(step2)
-            step2_btns.grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
-            ttk.Button(
-                step2_btns,
-                text="Test Credentials (safe, no trading)",
-                command=_test_credentials,
-            ).pack(side="left")
-
-            # -----------------------------
-            # Step 3 — Save
-            # -----------------------------
-            step3 = ttk.LabelFrame(
-                container, text="Step 3 — Save to the OS credential store (required)"
-            )
-            step3.grid(row=4, column=0, sticky="nsew")
-            step3.columnconfigure(0, weight=1)
-
-            ack_var = tk.BooleanVar(value=False)
-            ack = ttk.Checkbutton(
-                step3,
-                text="I understand my PRIVATE key is secret and I will not share it.",
-                variable=ack_var,
-            )
-            ack.grid(row=0, column=0, sticky="w", padx=10, pady=(10, 6))
-
-            save_btns = ttk.Frame(step3)
-            save_btns.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 12))
-
-            def do_save():
-                api_key = (api_key_var.get() or "").strip()
-                priv_b64 = (private_b64_state.get("value") or "").strip()
-
-                if not priv_b64:
-                    messagebox.showerror(
-                        "Missing private key", "Step 1: click 'Generate Keys' first."
-                    )
-                    return
-
-                # Normalize private key so pt_thinker.py can load it:
-                # - Accept 32 bytes (seed) OR 64 bytes (seed+pub) from older hub versions
-                # - Save ONLY base64(seed32)
-                try:
-                    raw = base64.b64decode(priv_b64)
-                    if len(raw) == 64:
-                        raw = raw[:32]
-                        priv_b64 = base64.b64encode(raw).decode("utf-8")
-                        private_b64_state["value"] = (
-                            priv_b64  # keep UI state consistent
-                        )
-                    elif len(raw) != 32:
-                        messagebox.showerror(
-                            "Bad private key",
-                            f"Your private key decodes to {len(raw)} bytes, but it must be 32 bytes.\n\n"
-                            "Click 'Generate Keys' again to create a fresh keypair.",
-                        )
-                        return
-                except Exception as e:
-                    messagebox.showerror(
-                        "Bad private key",
-                        f"Couldn't decode the private key as base64.\n\nError:\n{e}",
-                    )
-                    return
-
-                if not api_key:
-                    messagebox.showerror(
-                        "Missing API key",
-                        "Step 2: paste your API key from Robinhood first.",
-                    )
-                    return
-                if not bool(ack_var.get()):
-                    messagebox.showwarning(
-                        "Please confirm",
-                        "For safety, please check the box confirming you understand your private key is secret.",
-                    )
-                    return
-
-                # Small sanity warning (don’t block, just help)
-                if len(api_key) < 10:
-                    if not messagebox.askyesno(
-                        "API key looks short",
-                        "That API key looks unusually short. Are you sure you pasted the API Key from Robinhood?",
-                    ):
-                        return
-
-                try:
-                    # Store via pt_secrets in the OS credential store (no file is written)
-                    if KeyringCredentialManager is None:
-                        raise RuntimeError(
-                            "pt_credentials module not available — "
-                            "cannot store credentials."
-                        )
-                    KeyringCredentialManager().encrypt_credentials(api_key, priv_b64)
-                except Exception as e:
-                    # pt_secrets messages never contain the values; a missing
-                    # keyring names the environment variables to use instead.
-                    messagebox.showerror(
-                        "Save failed",
-                        f"Couldn't save credentials.\n\n{e}",
-                    )
-                    return
-
-                _refresh_api_status()
-                messagebox.showinfo(
-                    "Saved",
-                    "✅ Saved!\n\n"
-                    "Your API Key and Private Key are in the operating system's credential "
-                    "store. The trader reads them from there when it starts.\n\n"
-                    "Next steps:\n"
-                    "  1) Close this window\n"
-                    "  2) Start the trader (pt_trader.py)\n"
-                    "If something fails, come back here and click 'Test Credentials'.",
-                )
-                wiz.destroy()
-
-            ttk.Button(save_btns, text="Save", command=do_save).pack(side="left")
-            ttk.Button(save_btns, text="Close", command=wiz.destroy).pack(
-                side="left", padx=8
-            )
-
-        ttk.Label(frm, text="Robinhood API:").grid(
-            row=r, column=0, sticky="w", padx=(0, 10), pady=6
-        )
-
-        api_row = ttk.Frame(frm)
-        api_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=6)
-        api_row.columnconfigure(0, weight=1)
-
-        ttk.Label(api_row, textvariable=api_status_var).grid(
-            row=0, column=0, sticky="w"
-        )
-        ttk.Button(
-            api_row, text="Setup Wizard", command=_open_robinhood_api_wizard
-        ).grid(row=0, column=1, sticky="e", padx=(10, 0))
-        ttk.Button(api_row, text="Clear", command=_clear_api_files).grid(
-            row=0, column=2, sticky="e", padx=(8, 0)
-        )
-
-        r += 1
-
-        _refresh_api_status()
 
         ttk.Separator(frm, orient="horizontal").grid(
             row=r, column=0, columnspan=3, sticky="ew", pady=10
@@ -8677,6 +8273,9 @@ Platform: {sys.platform}
                 self.settings["training_notifications"] = notifications_var.get()
 
                 self._save_settings()
+                # the runner, trainers and trader read the exchange choice from
+                # trading_config.json, not from gui_settings.json
+                self._sync_exchange_choice()
 
                 # Apply theme changes
                 self._apply_theme()
@@ -8806,6 +8405,42 @@ Platform: {sys.platform}
         else:
             return {"status": "stopped", "message": "API server is stopped"}
 
+    def _exchange_status_once(self, primary_exchange: str) -> Tuple[str, str]:
+        """One status check of the primary exchange: ``(status, details)``.
+
+        It asks the exchange's own connector for a public BTC price (no key
+        needed). The hub's MultiExchangeManager is never connected, so the old
+        check always reported "Exchange not available". The details also say
+        whether this version can trade live on that exchange: most connectors
+        serve prices only (no balances or orders)."""
+        name = primary_exchange.upper()
+        try:
+            import pt_exchanges  # noqa: F401  (registers the connectors)
+            from pt_exchange_abstraction import ExchangeFactory, ExchangeType
+
+            cache = getattr(self, "_status_exchanges", None)
+            if cache is None:
+                cache = self._status_exchanges = {}
+            exchange = cache.get(primary_exchange)
+            if exchange is None:
+                exchange = ExchangeFactory.get_exchange(ExchangeType(primary_exchange))
+                cache[primary_exchange] = exchange
+            price = float(exchange.get_current_price("BTC-USD"))
+        except Exception as exc:
+            return f"❌ {name}", f"No price from {primary_exchange}: {str(exc)[:160]}"
+        if price <= 0:
+            return f"⚠️ {name}", f"{primary_exchange} answered but gave no price"
+        if getattr(exchange, "SUPPORTS_LIVE_ORDERS", False):
+            return (
+                f"✅ {name}",
+                f"Prices OK | BTC ${price:,.2f} | live orders supported",
+            )
+        return (
+            f"✅ {name} (prices only)",
+            f"Prices OK | BTC ${price:,.2f} | this version cannot read balances or "
+            f"place live orders on {primary_exchange}; paper trading works",
+        )
+
     def _check_exchange_status_worker(self):
         """Background worker to check exchange connectivity"""
         while True:
@@ -8827,35 +8462,7 @@ Platform: {sys.platform}
                     time.sleep(30)
                     continue
 
-                # Check if primary exchange is available
-                available_exchanges = self._multi_exchange.get_available_exchanges()
-
-                if primary_exchange in available_exchanges:
-                    # Try to get market data to test connectivity
-                    try:
-                        # Test with a common symbol
-                        test_symbol = (
-                            "BTCUSD"
-                            if primary_exchange
-                            in ["coinbase", "kraken", "binance", "kucoin"]
-                            else "BTC"
-                        )
-                        market_data = self._multi_exchange.get_market_data(
-                            test_symbol, primary_exchange
-                        )
-
-                        if market_data and market_data.price > 0:
-                            status = f"✅ {primary_exchange.upper()}"
-                            details = f"Connected | Price: ${market_data.price:,.2f}"
-                        else:
-                            status = f"⚠️ {primary_exchange.upper()}"
-                            details = "Connected but no data"
-                    except Exception:
-                        status = f"❌ {primary_exchange.upper()}"
-                        details = "Connection failed"
-                else:
-                    status = f"❌ {primary_exchange.upper()}"
-                    details = "Exchange not available"
+                status, details = self._exchange_status_once(primary_exchange)
 
                 # Update status
                 self._exchange_status = {"status": status, "details": details}
@@ -8891,6 +8498,34 @@ Platform: {sys.platform}
                     )
         except Exception:
             pass
+
+    def _sync_exchange_choice(self) -> None:
+        """Write the Settings window's region and primary exchange into the shared
+        exchange config (``trading_config.json``), which the neural runner, the
+        trainers and the trader read. ``gui_settings.json`` is the hub's own copy;
+        without this the processes kept an old primary (e.g. binance)."""
+        if not EXCHANGE_SUPPORT_AVAILABLE:
+            return
+        region = str(self.settings.get("region", "") or "").strip().upper()
+        primary = str(self.settings.get("primary_exchange", "") or "").strip().lower()
+        if not region and not primary:
+            return
+        try:
+            manager = ExchangeConfigManager()
+            config = manager.load_config() or manager.create_default_config(
+                region or "GLOBAL"
+            )
+            changed = False
+            if region and config.user_region != region:
+                config.user_region = region
+                changed = True
+            if primary and config.primary_exchange != primary:
+                config.primary_exchange = primary
+                changed = True
+            if changed:
+                manager.save_config(config)
+        except Exception as e:
+            print(f"Could not save the exchange choice for the runner and trader: {e}")
 
     def refresh_exchange_settings(self):
         """Refresh exchange system with new settings - called when settings are saved"""

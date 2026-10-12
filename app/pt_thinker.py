@@ -141,6 +141,15 @@ class RobinhoodMarketData:
         return float(result["ask_inclusive_of_buy_spread"])
 
 
+_PRINTED = set()
+
+
+def _print_once(message: str) -> None:
+    if message not in _PRINTED:
+        _PRINTED.add(message)
+        print(message)
+
+
 def robinhood_current_ask(symbol: str) -> float:
     """
     Returns current BUY price (ask_inclusive_of_buy_spread) for symbols like 'BTC-USD'.
@@ -171,7 +180,7 @@ def robinhood_current_ask(symbol: str) -> float:
                 price = multi_exchange_manager.get_current_price(symbol)
                 return price
             except Exception as e:
-                print(
+                _print_once(
                     f"Multi-exchange pricing failed: {e}, falling back to legacy Robinhood"
                 )
 
@@ -185,8 +194,8 @@ def robinhood_current_ask(symbol: str) -> float:
         credentials = get_credentials()
         if not credentials:
             raise RuntimeError(
-                "Missing encrypted API credentials. "
-                "Run the GUI and set up Robinhood API credentials in Settings."
+                "Missing Robinhood API credentials (POWERTRADER_ROBINHOOD_API_KEY / "
+                "POWERTRADER_ROBINHOOD_PRIVATE_KEY, or the OS credential store)."
             )
 
         api_key, priv_b64 = credentials
@@ -412,9 +421,9 @@ def _coin_is_trained(sym: str) -> bool:
     """
     Training freshness gate:
 
-    pt_trainer.py writes `trainer_last_training_time.txt` in the coin folder
-    when training starts. If that file is missing OR older than 14 days, we treat
-    the coin as NOT TRAINED.
+    The trainer writes `trainer_last_training_time.txt` in the coin folder when
+    training finishes (the hub deletes it when a new training run starts). If that
+    file is missing OR older than 14 days, we treat the coin as NOT TRAINED.
 
     This is intentionally the same logic as pt_hub.py so runner behavior matches
     what the GUI shows.
@@ -566,6 +575,194 @@ states = {}
 
 display_cache = {sym: f"{sym}  (starting.)" for sym in CURRENT_COINS}
 
+try:
+    from pt_exchange_abstraction import MarketNotFound
+except Exception:  # keep the runner importable without the exchange layer
+
+    class MarketNotFound(RuntimeError):
+        """The data source has no market for the symbol."""
+
+
+class CoinUnavailable(Exception):
+    """A coin whose data source has no market for it: retrying cannot help."""
+
+
+class CoinDataError(Exception):
+    """A coin's price data could not be read this pass; it is tried again next pass."""
+
+
+# Attempts per candle request before a coin is skipped for the pass.
+_HISTORY_ATTEMPTS = 2
+
+
+def _history_rows(coin: str, tf: str) -> list:
+    """The coin's recent ``tf`` candles as lists of fields, newest first: row 0 is
+    the bar still forming, row 1 the last closed bar ([time, open, close, ...]).
+    A missing market raises CoinUnavailable at once; other failures are retried
+    briefly and then raise CoinDataError, so one coin cannot stall the runner."""
+    reason = None
+    for attempt in range(_HISTORY_ATTEMPTS):
+        if attempt:
+            time.sleep(2)
+        try:
+            if not data_provider:
+                raise RuntimeError("No data providers available")
+            history = (
+                data_provider.get_historical_data(coin, tf)
+                .replace("]]", "], ")
+                .replace("[[", "[")
+            )
+        except MarketNotFound as e:
+            raise CoinUnavailable(str(e)) from None
+        except Exception as e:
+            reason = e
+            continue
+        rows = history.split("], [")
+        if len(rows) >= 2:
+            return [
+                str(r).replace('"', "").replace("'", "").replace("[", "").split(", ")
+                for r in rows
+            ]
+        reason = f"only {len(rows)} candle"
+    raise CoinDataError(f"no {tf} price history for {coin}: {reason}")
+
+
+def _last_closed_bar(coin: str, tf: str) -> tuple:
+    """(time, open, close) of the coin's last closed ``tf`` bar."""
+    row = _history_rows(coin, tf)[1]
+    try:
+        bar = (row[0], float(row[1]), float(row[2]))
+    except (IndexError, ValueError):
+        raise CoinDataError(f"unreadable {tf} candle for {coin}: {row}") from None
+    if bar[1] <= 0:
+        raise CoinDataError(f"{tf} candle for {coin} has no open price: {row}")
+    return bar
+
+
+def _current_price(sym: str) -> float:
+    """The coin's current price: the primary exchange's ask, as before, else the
+    latest trade on the candles' source (the forming 1-hour bar's close). Raises
+    CoinDataError instead of retrying for ever."""
+    try:
+        price = float(robinhood_current_ask(f"{sym}-USD"))
+        if price > 0:
+            return price
+        primary = "price 0"
+    except Exception as exc:
+        primary = exc
+    try:
+        price = float(_history_rows(f"{sym}-USDT", "1hour")[0][2])
+    except CoinUnavailable:
+        raise
+    except Exception as exc:
+        raise CoinDataError(f"no current price for {sym}: {primary}; {exc}") from None
+    if price <= 0:
+        raise CoinDataError(f"no current price for {sym}: {primary}")
+    return price
+
+
+def _replace_text(path: str, text: str) -> None:
+    """Replace ``path`` whole, so a reader sees the old or the new text, never an
+    empty file. A reader holding the file open on Windows blocks the replace for a
+    moment, so it is retried; after that the file is written in place."""
+    tmp = path + ".writing"  # not ".tmp": the hub's chart reader deletes <path>.tmp
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    for _ in range(10):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.01)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
+def _write_signal_counts(sym: str, longs: int, shorts: int) -> None:
+    """Write how many timeframes are long and short (0..7) where the trader and the
+    hub read them (long_dca_signal.txt / short_dca_signal.txt), and under the names
+    this runner used since March (signals_dca_spread / signals_dca_single.txt).
+
+    The trader reads long, short, then long again, and uses the pair only when both
+    long reads agree. Long is therefore set to 0 first, then short, then long: any
+    pair the trader accepts is one published here, or has long 0. If the short
+    count cannot be written, long stays 0. Never raises."""
+    folder = coin_folder(sym)
+    steps = [
+        ("long_dca_signal.txt", 0),
+        ("short_dca_signal.txt", shorts),
+        ("long_dca_signal.txt", longs),
+        ("signals_dca_single.txt", shorts),
+        ("signals_dca_spread.txt", longs),
+    ]
+    for name, value in steps:
+        try:
+            _replace_text(os.path.join(folder, name), str(int(value)))
+        except Exception:
+            if name == "short_dca_signal.txt":
+                return  # long stays 0: no trade on an unknown short count
+
+
+def _training_in_progress(sym: str) -> bool:
+    """The pattern trainer marks trainer_status.json TRAINING while it runs."""
+    try:
+        path = os.path.join(coin_folder(sym), "trainer_status.json")
+        with open(path, encoding="utf-8") as f:
+            return str(json.load(f).get("state", "")).upper() == "TRAINING"
+    except Exception:
+        return False
+
+
+# Coins skipped because the data source has no market for them (symbol -> reason).
+# They get no signals and do not hold up "runner ready" (which gates the trader).
+UNAVAILABLE_COINS = {}
+
+
+def _mark_unavailable(sym: str, reason) -> None:
+    if sym not in UNAVAILABLE_COINS:
+        print(
+            f"Skipping {sym}: {reason}. It gets no signals. Remove it from Coins in "
+            "Settings, or connect an exchange that lists it and restart the runner."
+        )
+        sys.stdout.flush()
+    UNAVAILABLE_COINS[sym] = str(reason)
+    _write_signal_counts(sym, 0, 0)
+    try:
+        display_cache[sym] = f"{sym}  (SKIPPED - no market: {reason})"
+    except Exception:
+        pass
+
+
+def _note_coin_error(sym: str, exc) -> None:
+    """Report a coin's failed step once per distinct error and show it in the
+    coin's display; the runner carries on with the other coins."""
+    message = f"{type(exc).__name__}: {exc}"
+    if _LAST_COIN_ERROR.get(sym) != message:
+        print(f"{sym}: skipped this pass - {message}")
+        sys.stdout.flush()
+    _LAST_COIN_ERROR[sym] = message
+    _write_signal_counts(sym, 0, 0)
+    label = "WAITING FOR PRICE DATA" if isinstance(exc, CoinDataError) else "ERROR"
+    try:
+        _ready_coins.discard(sym)
+        display_cache[sym] = f"{sym}  ({label} - {message})"
+    except Exception:
+        pass
+
+
+# The last error printed per coin, so a repeating failure is printed once.
+_LAST_COIN_ERROR = {}
+
+
+def _coins_needed_for_ready(coins) -> int:
+    """How many coins must be ready: skipped coins never will be."""
+    return len([c for c in coins if c not in UNAVAILABLE_COINS])
+
+
 # Track which coins have produced REAL predicted levels (not placeholder 1 / 99999999999999999)
 _ready_coins = set()
 
@@ -628,6 +825,9 @@ def _sync_coins_from_settings() -> None:
             # init_coin switches CWD and does network calls, so do it carefully
             init_coin(sym)
             os.chdir(BASE_DIR)
+        except CoinUnavailable as exc:
+            _mark_unavailable(sym, exc)
+            os.chdir(BASE_DIR)
         except Exception:
             try:
                 os.chdir(BASE_DIR)
@@ -654,44 +854,30 @@ def init_coin(sym: str):
     st = new_coin_state()
 
     coin = sym + "-USDT"
-    ind = 0
     tf_times_local = []
-    while True:
-        history_list = []
-        while True:
-            try:
-                if not data_provider or not data_provider.is_available():
-                    raise RuntimeError("No data providers available")
-                history = (
-                    data_provider.get_historical_data(coin, tf_choices[ind])
-                    .replace("]]", "], ")
-                    .replace("[[", "[")
-                )
-                break
-            except Exception as e:
-                time.sleep(3.5)
-                if "Requests" in str(e):
-                    pass
-                else:
-                    PrintException()
-                continue
-
-        history_list = history.split("], [")
-        ind += 1
+    for tf in tf_choices:
         try:
-            working_minute = (
-                str(history_list[1]).replace('"', "").replace("'", "").split(", ")
-            )
-            the_time = working_minute[0].replace("[", "")
-        except Exception:
-            the_time = 0.0
-
-        tf_times_local.append(the_time)
-        if len(tf_times_local) >= len(tf_choices):
+            the_time = _history_rows(coin, tf)[1][0]
+        except CoinDataError as exc:
+            # its passes fetch the candles again; do not hold up the other coins
+            print(f"{sym}: {exc}")
+            sys.stdout.flush()
+            tf_times_local += [0.0] * (len(tf_choices) - len(tf_times_local))
             break
+        tf_times_local.append(the_time)
 
     st["tf_times"] = tf_times_local
     states[sym] = st
+
+
+def _reset_coin_state(sym: str) -> Dict[str, Any]:
+    """Discard the coin's predictions and bounds (they belong to a model that is
+    gone or replaced); keep its candle times."""
+    tf_times = states.get(sym, {}).get("tf_times", [])
+    st = states[sym] = new_coin_state()
+    st["tf_times"] = tf_times
+    _ready_coins.discard(sym)
+    return st
 
 
 def step_coin(sym: str):
@@ -717,23 +903,23 @@ def step_coin(sym: str):
                 f.write("0.25")
             with open("futures_short_profit_margin.txt", "w+") as f:
                 f.write("0.25")
-            with open("signals_dca_spread.txt", "w+") as f:
-                f.write("0")
-            with open("signals_dca_single.txt", "w+") as f:
-                f.write("0")
         except Exception:
             pass
+        _write_signal_counts(sym, 0, 0)
+        _reset_coin_state(sym)
         try:
-            display_cache[sym] = sym + (
-                "  (NOT TRAINED / OUTDATED - run trainer)"
-                if not trained
-                else "  (MODEL NOT VERIFIED - no matching manifest; retrain)"
-            )
+            if trained:
+                held = "  (MODEL NOT VERIFIED - no matching manifest; retrain)"
+            elif _training_in_progress(sym):
+                held = "  (TRAINING - no signals until the new model is saved)"
+            else:
+                held = "  (NOT TRAINED / OUTDATED - run trainer)"
+            display_cache[sym] = sym + held
         except Exception:
             pass
         try:
             _ready_coins.discard(sym)
-            all_ready = len(_ready_coins) >= len(CURRENT_COINS)
+            all_ready = len(_ready_coins) >= _coins_needed_for_ready(CURRENT_COINS)
             _write_runner_ready(
                 all_ready,
                 stage=("real_predictions" if all_ready else "training_required"),
@@ -745,6 +931,13 @@ def step_coin(sym: str):
             pass
         return
 
+    # A new model starts from placeholders, as after a runner restart: its first
+    # sweep writes no LONG/SHORT and does not mark the coin ready.
+    model_id = (_verified_models.get(sym, (None, None))[1] or {}).get("model_id")
+    if st.get("model_id") != model_id:
+        st = _reset_coin_state(sym)
+        st["model_id"] = model_id
+
     # ensure new readiness-version keys exist even if restarting from an older state dict
     if "bounds_version" not in st:
         st["bounds_version"] = 0
@@ -755,6 +948,7 @@ def step_coin(sym: str):
     low_bound_prices = st["low_bound_prices"]
     high_bound_prices = st["high_bound_prices"]
     tf_times = st["tf_times"]
+    tf_times += [0.0] * (len(tf_choices) - len(tf_times))
     tf_choice_index = st["tf_choice_index"]
 
     tf_update = st["tf_update"]
@@ -777,41 +971,8 @@ def step_coin(sym: str):
 
     last_difference_between = 0.0
 
-    # ====== ORIGINAL: fetch current candle for this timeframe index ======
-    while True:
-        history_list = []
-        while True:
-            try:
-                if not data_provider or not data_provider.is_available():
-                    raise RuntimeError("No data providers available")
-                history = (
-                    data_provider.get_historical_data(coin, tf_choices[tf_choice_index])
-                    .replace("]]", "], ")
-                    .replace("[[", "[")
-                )
-                break
-            except Exception as e:
-                time.sleep(3.5)
-                if "Requests" in str(e):
-                    pass
-                else:
-                    pass
-                continue
-        history_list = history.split("], [")
-        # KuCoin can occasionally return an empty/short kline response.
-        # Guard against history_list[1] raising IndexError.
-        if len(history_list) < 2:
-            time.sleep(0.2)
-            continue
-        working_minute = (
-            str(history_list[1]).replace('"', "").replace("'", "").split(", ")
-        )
-        try:
-            openPrice = float(working_minute[1])
-            closePrice = float(working_minute[2])
-            break
-        except Exception:
-            continue
+    # ====== fetch the last closed candle for this timeframe index ======
+    _, openPrice, closePrice = _last_closed_bar(coin, tf_choices[tf_choice_index])
 
     current_candle = 100 * ((closePrice - openPrice) / openPrice)
 
@@ -998,13 +1159,6 @@ def step_coin(sym: str):
         del perfects[tf_choice_index]
         perfects.insert(tf_choice_index, "inactive")
 
-    # keep threshold persisted (original behavior)
-    file = open(
-        "neural_perfect_threshold_" + tf_choices[tf_choice_index] + ".txt", "w+"
-    )
-    file.write(str(perfect_threshold))
-    file.close()
-
     # ====== ORIGINAL: compute new high/low predictions ======
     price_list2 = [openPrice, closePrice]
     current_pattern = [price_list2[0], price_list2[1]]
@@ -1042,15 +1196,8 @@ def step_coin(sym: str):
         # reset tf_update for this coin (but DO NOT block-wait; just detect updates and return)
         tf_update = ["no"] * len(tf_choices)
 
-        # get current price ONCE per coin — use Robinhood's current ASK (same as rhcb trader buy price)
-        rh_symbol = f"{sym}-USD"
-        while True:
-            try:
-                current = robinhood_current_ask(rh_symbol)
-                break
-            except Exception as e:
-                print(e)
-                continue
+        # get current price ONCE per coin (primary exchange ask, else the candles' source)
+        current = _current_price(sym)
 
         # IMPORTANT: messages printed below use the bounds currently in state.
         # We only allow "ready" once messages are generated using a non-startup bounds_version.
@@ -1089,34 +1236,6 @@ def step_coin(sym: str):
         # per-timeframe message logic (same decisions as before)
         inder = 0
         while inder < len(tf_choices):
-            # update the_time snapshot (same as before)
-            while True:
-                try:
-                    if not data_provider or not data_provider.is_available():
-                        raise RuntimeError("No data providers available")
-                    history = (
-                        data_provider.get_historical_data(coin, tf_choices[inder])
-                        .replace("]]", "], ")
-                        .replace("[[", "[")
-                    )
-                    break
-                except Exception as e:
-                    time.sleep(3.5)
-                    if "Requests" in str(e):
-                        pass
-                    else:
-                        PrintException()
-                    continue
-
-            history_list = history.split("], [")
-            try:
-                working_minute = (
-                    str(history_list[1]).replace('"', "").replace("'", "").split(", ")
-                )
-                the_time = working_minute[0].replace("[", "")
-            except Exception:
-                the_time = 0.0
-
             # (original comparisons)
             if (
                 current > high_bound_prices[inder]
@@ -1420,7 +1539,7 @@ def step_coin(sym: str):
             else:
                 _ready_coins.discard(sym)
 
-            all_ready = len(_ready_coins) >= len(COIN_SYMBOLS)
+            all_ready = len(_ready_coins) >= _coins_needed_for_ready(COIN_SYMBOLS)
             _write_runner_ready(
                 all_ready,
                 stage=("real_predictions" if all_ready else "warming_up"),
@@ -1447,8 +1566,6 @@ def step_coin(sym: str):
 
             with open("futures_profit_margin_spread.txt", "w+") as f:
                 f.write(str(pm))
-            with open("signals_dca_spread.txt", "w+") as f:
-                f.write(str(longs))
 
             # short pm
             current_pms = [m for m in margins if m != 0]
@@ -1461,43 +1578,19 @@ def step_coin(sym: str):
 
             with open("futures_profit_margin_single.txt", "w+") as f:
                 f.write(str(abs(pm)))
-            with open("signals_dca_single.txt", "w+") as f:
-                f.write(str(shorts))
 
         except:
             PrintException()
+            longs, shorts = 0, 0
+        _write_signal_counts(sym, longs, shorts)
 
         # ====== NON-BLOCKING candle update check (single pass) ======
         this_index_now = 0
         while this_index_now < len(tf_update):
-            while True:
-                try:
-                    if not data_provider or not data_provider.is_available():
-                        raise RuntimeError("No data providers available")
-                    history = (
-                        data_provider.get_historical_data(
-                            coin, tf_choices[this_index_now]
-                        )
-                        .replace("]]", "], ")
-                        .replace("[[", "[")
-                    )
-                    break
-                except Exception as e:
-                    time.sleep(3.5)
-                    if "Requests" in str(e):
-                        pass
-                    else:
-                        PrintException()
-                    continue
-
-            history_list = history.split("], [")
             try:
-                working_minute = (
-                    str(history_list[1]).replace('"', "").replace("'", "").split(", ")
-                )
-                the_time = working_minute[0].replace("[", "")
-            except Exception:
-                the_time = 0.0
+                the_time = _history_rows(coin, tf_choices[this_index_now])[1][0]
+            except CoinDataError:
+                the_time = tf_times[this_index_now]  # unchanged; checked next sweep
 
             if the_time != tf_times[this_index_now]:
                 del tf_update[this_index_now]
@@ -1557,7 +1650,12 @@ def main():
     for _sym in coins_to_process:
         print(f"Initializing coin: {_sym}")
         sys.stdout.flush()
-        init_coin(_sym)
+        try:
+            init_coin(_sym)
+        except CoinUnavailable as exc:
+            _mark_unavailable(_sym, exc)
+        except Exception as exc:
+            _note_coin_error(_sym, exc)  # its passes initialise it again
 
     # restore CWD to base after init
     os.chdir(BASE_DIR)
@@ -1582,15 +1680,33 @@ def main():
 
             # Hot-reload coins from GUI settings (only for all-coins mode)
             if not target_coin:
-                _sync_coins_from_settings()
+                try:
+                    _sync_coins_from_settings()
+                except Exception as exc:
+                    print(f"Coin list not reloaded: {exc}")
+                    sys.stdout.flush()
                 coins_to_process = CURRENT_COINS
             else:
                 coins_to_process = [target_coin]
 
             for _sym in coins_to_process:
+                if _sym in UNAVAILABLE_COINS:
+                    continue
                 print(f"Processing {_sym}...")
                 sys.stdout.flush()
-                step_coin(_sym)
+                try:
+                    step_coin(_sym)
+                    _LAST_COIN_ERROR.pop(
+                        _sym, None
+                    )  # a later failure is reported again
+                except CoinUnavailable as exc:
+                    _mark_unavailable(_sym, exc)
+                    os.chdir(BASE_DIR)
+                except Exception as exc:
+                    # One coin's failure (e.g. its model files deleted by a new
+                    # training run mid-step) must not stop the other coins.
+                    _note_coin_error(_sym, exc)
+                    os.chdir(BASE_DIR)
 
             # Comment out screen clearing for GUI visibility - let GUI handle display
             # os.system("cls" if os.name == "nt" else "clear")
@@ -1611,6 +1727,7 @@ def main():
         print(f"Error in main loop: {e}")
         sys.stdout.flush()
         PrintException()
+        raise SystemExit(1)  # the hub shows the exit code
 
 
 if __name__ == "__main__":

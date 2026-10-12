@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -31,7 +32,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from enum import Enum
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 from pt_exchange_abstraction import (
     AbstractExchange,
@@ -442,8 +443,8 @@ class PaperExchange(AbstractExchange):
         self._lock = threading.RLock()
         self._rejections: Dict[str, OrderResult] = {}
         self.last_quotes: Dict[str, PricedQuote] = {}
-        if state_path:
-            self.load_state(state_path)
+        # False when there is no saved book or it could not be read
+        self.state_loaded = bool(state_path) and self.load_state(state_path)
 
     def get_exchange_name(self) -> str:
         return "paper"
@@ -675,17 +676,284 @@ class PaperExchange(AbstractExchange):
                     average_price=Decimal(p["average_price"]),
                     current_price=Decimal(p["average_price"]),
                 )
-                for sym, p in state.get("positions", {}).items()
+                for sym, p in (state.get("positions") or {}).items()
             }
             initial = Decimal(
                 state.get("initial_balance", self.account.initial_balance)
             )
-        except (OSError, ValueError, KeyError, TypeError, ArithmeticError):
+        except FileNotFoundError:
+            return False
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+            ArithmeticError,
+        ) as exc:
+            # A bad hand edit must not crash start-up; say so instead of silently
+            # trading the default balance.
+            logger.warning(
+                "Paper account %s could not be read (%s); starting from the "
+                "default balance. Fix it in Settings > Paper Account.",
+                path,
+                type(exc).__name__,
+            )
             return False
         self.account.cash_balance = cash
         self.account.positions = positions
         self.account.initial_balance = initial
         return True
+
+
+# -- the paper book on disk (the Settings window edits it; the trader loads it) --
+
+PAPER_DATA_SUBDIR = "paper"  # TradingSettings.data_subdir in paper mode
+PAPER_BOOK_FILE = "paper_account.json"
+PAPER_LEDGER_FILE = "pnl_ledger.json"
+DEFAULT_PAPER_BALANCE = Decimal("10000")
+_PAPER_SYMBOL_RE = re.compile(r"^[A-Z]{2,10}$")  # the trader's holdings filter
+_PAPER_CASH_SYMBOLS = frozenset({"USD", "ZUSD", "USDT", "USDC", "BUSD"})  # cash
+_PAPER_MAX_QUANTITY = Decimal("1e9")
+# Files in <hub>/paper that a reset backs up so P&L and history start again too.
+PAPER_HISTORY_FILES = (
+    PAPER_LEDGER_FILE,
+    "trade_history.jsonl",
+    "account_value_history.jsonl",
+    "strategy_state.json",
+    "trader_status.json",
+)
+
+
+class PaperBookError(ValueError):
+    """The paper book cannot be read or is not valid. The message is safe to show."""
+
+
+class PaperBookUnreadable(PaperBookError):
+    """The file cannot be parsed the way the trader parses it (bad JSON, a missing
+    or malformed field, a number written with commas): the trader ignores it and
+    starts from the default balance."""
+
+
+class PaperBookInvalid(PaperBookError):
+    """The file parses but a value breaks a rule (e.g. a starting balance of 0).
+    The trader still loads it as written; the Paper Account window will not save
+    it until it is fixed."""
+
+
+@dataclass
+class PaperBook:
+    """What ``paper_account.json`` holds: ``positions`` maps a base asset (``BTC``)
+    to ``(quantity, average_price)``."""
+
+    initial_balance: Decimal
+    cash_balance: Decimal
+    positions: Dict[str, Tuple[Decimal, Decimal]]
+
+
+def paper_book_path(hub_dir: str) -> str:
+    """The book the paper trader loads at start-up (``<hub>/paper/paper_account.json``)."""
+    return os.path.join(hub_dir, PAPER_DATA_SUBDIR, PAPER_BOOK_FILE)
+
+
+def paper_ledger_path(hub_dir: str) -> str:
+    """The paper P&L ledger (cost basis per open position, realized profit)."""
+    return os.path.join(hub_dir, PAPER_DATA_SUBDIR, PAPER_LEDGER_FILE)
+
+
+_THOUSANDS_RE = re.compile(r"^-?\d{1,3}(,\d{3})+(\.\d+)?$")
+
+
+def _decimal(value: Any, what: str, grouping: bool = True) -> Decimal:
+    """A finite Decimal. With ``grouping`` (form input) a comma is accepted only as a
+    thousands separator (``10,000.5``); ``0,5`` is refused, never read as 5."""
+    text = str(value).strip()
+    if "," in text:
+        if not (grouping and _THOUSANDS_RE.match(text)):
+            raise PaperBookInvalid(
+                f"{what}: use a dot for decimals (e.g. 0.5) and no other commas."
+            )
+        text = text.replace(",", "")
+    try:
+        number = Decimal(text)
+    except (ArithmeticError, ValueError, TypeError):
+        raise PaperBookInvalid(f"{what} must be a number.") from None
+    if not number.is_finite():
+        raise PaperBookInvalid(f"{what} must be a number.")
+    return number
+
+
+def validate_paper_book(
+    initial_balance: Any,
+    cash_balance: Any,
+    positions: Mapping[str, Tuple[Any, Any]],
+    grouping: bool = True,
+) -> PaperBook:
+    """A checked ``PaperBook`` from raw values (strings from a form are fine).
+
+    The starting balance must be above 0 (the return % is measured from it), cash
+    0 or more; each symbol a base asset of 2-10 letters (upper-cased), with a
+    quantity and an average price above 0, and no symbol twice. Raises
+    PaperBookInvalid."""
+    initial = _decimal(initial_balance, "The starting balance", grouping)
+    if initial <= 0:
+        raise PaperBookInvalid("The starting balance must be more than 0.")
+    cash = _decimal(cash_balance, "The cash balance", grouping)
+    if cash < 0:
+        raise PaperBookInvalid("The cash balance cannot be negative.")
+    checked: Dict[str, Tuple[Decimal, Decimal]] = {}
+    for raw_symbol, (raw_qty, raw_price) in positions.items():
+        symbol = str(raw_symbol).strip().upper()
+        if not _PAPER_SYMBOL_RE.match(symbol):
+            raise PaperBookInvalid(
+                f"'{raw_symbol}' is not a coin symbol (2-10 letters, e.g. BTC)."
+            )
+        if symbol in _PAPER_CASH_SYMBOLS:
+            raise PaperBookInvalid(
+                f"{symbol} is cash, not a coin: put it in the cash balance."
+            )
+        if symbol in checked:
+            raise PaperBookInvalid(f"{symbol} is listed twice.")
+        qty = _decimal(raw_qty, f"The quantity of {symbol}", grouping)
+        price = _decimal(raw_price, f"The average price of {symbol}", grouping)
+        if qty <= 0:
+            raise PaperBookInvalid(f"The quantity of {symbol} must be more than 0.")
+        if qty > _PAPER_MAX_QUANTITY:
+            raise PaperBookInvalid(f"The quantity of {symbol} is too large.")
+        if price <= 0:
+            raise PaperBookInvalid(
+                f"The average price of {symbol} must be more than 0."
+            )
+        checked[symbol] = (qty, price)
+    return PaperBook(initial, cash, checked)
+
+
+def read_paper_book(path: str) -> Optional[PaperBook]:
+    """The saved book, or None when there is none.
+
+    Raises PaperBookUnreadable when the trader could not parse the file either
+    (it then starts from the default balance), and PaperBookInvalid when the
+    trader loads it as written but a value breaks a rule. Numbers are parsed
+    exactly as the trader parses them (no commas)."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        raw_positions = state.get("positions") or {}
+        positions = {
+            sym: (p["quantity"], p["average_price"]) for sym, p in raw_positions.items()
+        }
+        initial = state.get("initial_balance", DEFAULT_PAPER_BALANCE)
+        cash = state["cash_balance"]
+        # what PaperExchange.load_state does: a value Decimal() refuses makes the
+        # trader ignore the whole file
+        for value in [initial, cash] + [v for pair in positions.values() for v in pair]:
+            Decimal(value)
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        ArithmeticError,
+    ) as exc:
+        raise PaperBookUnreadable(
+            f"The saved paper account could not be read ({type(exc).__name__})."
+        ) from None
+    return validate_paper_book(initial, cash, positions, grouping=False)
+
+
+def _atomic_write_json(path: str, data: Any) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+
+
+def write_paper_book(path: str, book: PaperBook) -> None:
+    """Save ``book`` in the format ``PaperExchange.load_state`` reads (atomic)."""
+    _atomic_write_json(
+        path,
+        {
+            "initial_balance": str(book.initial_balance),
+            "cash_balance": str(book.cash_balance),
+            "positions": {
+                sym: {"quantity": str(qty), "average_price": str(price)}
+                for sym, (qty, price) in book.positions.items()
+            },
+        },
+    )
+
+
+def write_paper_ledger_positions(
+    path: str,
+    book: PaperBook,
+    reset_realized: bool = False,
+    keep_cost: Iterable[str] = (),
+) -> None:
+    """Make the paper P&L ledger's open positions match ``book``.
+
+    The trader takes each position's cost basis (for take-profit and DCA) from
+    the ledger, not from the book, so a new or changed position gets
+    ``usd_cost = quantity x average price``. A position in ``keep_cost`` (left as
+    it was) keeps the ledger's own cost, which includes the buy commission, when
+    the ledger holds the same quantity. Pending orders belong to the old book and
+    are dropped; realized profit is kept unless ``reset_realized``. Other fields
+    are kept as they are."""
+    ledger: Dict[str, Any] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            ledger = loaded
+    except (OSError, ValueError):
+        pass
+    ledger.setdefault("total_realized_profit_usd", 0.0)
+    if reset_realized:
+        ledger["total_realized_profit_usd"] = 0.0
+    old = ledger.get("open_positions")
+    old = old if isinstance(old, dict) else {}
+    keep = set(keep_cost)
+    positions: Dict[str, Any] = {}
+    for sym, (qty, price) in book.positions.items():
+        prior = old.get(sym)
+        try:
+            same_qty = (
+                sym in keep
+                and isinstance(prior, dict)
+                and abs(float(prior.get("qty", 0.0)) - float(qty)) < 1e-12
+                and float(prior.get("usd_cost", 0.0)) > 0.0
+            )
+        except (TypeError, ValueError):
+            same_qty = False
+        positions[sym] = (
+            dict(prior)
+            if same_qty
+            else {"usd_cost": float(qty * price), "qty": float(qty)}
+        )
+    ledger["open_positions"] = positions
+    ledger["pending_orders"] = {}
+    ledger["last_updated_ts"] = time.time()
+    _atomic_write_json(path, ledger)
+
+
+def backup_paper_history(hub_dir: str, stamp: Optional[str] = None) -> list:
+    """Rename the paper ledger, trade and account-value history, strategy state
+    and trader status in ``<hub>/paper`` to ``<name>.bak-<stamp>``, so a reset
+    account starts its P&L and history from zero. Nothing is deleted. Returns the
+    new paths."""
+    folder = os.path.join(hub_dir, PAPER_DATA_SUBDIR)
+    stamp = stamp or time.strftime("%Y%m%d-%H%M%S")
+    moved = []
+    for name in PAPER_HISTORY_FILES:
+        src = os.path.join(folder, name)
+        if os.path.isfile(src):
+            dst = f"{src}.bak-{stamp}"
+            os.replace(src, dst)
+            moved.append(dst)
+    return moved
 
 
 _paper_exchange: Optional[PaperExchange] = None
@@ -694,11 +962,17 @@ _paper_lock = threading.Lock()
 
 def configure_paper_exchange(
     state_path: Optional[str] = None,
-    initial_balance: Decimal = Decimal("10000"),
+    initial_balance: Decimal = DEFAULT_PAPER_BALANCE,
     price_feed: Optional[Callable[[str], Optional[Quote]]] = fetch_public_quote,
     settings_source: Any = None,
 ) -> PaperExchange:
-    """(Re)create the process-wide paper exchange. Call once at trader start-up."""
+    """(Re)create the process-wide paper exchange. Call once at trader start-up.
+
+    With ``state_path`` the saved book is loaded. When there is no file yet, the
+    new book is saved at once, so it exists (and can be edited in Settings) before
+    the first order. A file the trader cannot read is renamed to
+    ``paper_account.json.bad-<date-time>`` (kept, never overwritten by the next
+    order) and a fresh book is saved in its place."""
     global _paper_exchange
     with _paper_lock:
         _paper_exchange = PaperExchange(
@@ -707,6 +981,19 @@ def configure_paper_exchange(
             state_path=state_path,
             settings_source=settings_source,
         )
+        if state_path:
+            if os.path.exists(state_path) and not _paper_exchange.state_loaded:
+                kept = f"{state_path}.bad-{time.strftime('%Y%m%d-%H%M%S')}"
+                try:
+                    os.replace(state_path, kept)
+                    logger.warning(
+                        "Unreadable paper account kept as %s; starting a fresh book.",
+                        kept,
+                    )
+                except OSError:
+                    pass
+            if not os.path.exists(state_path):
+                _paper_exchange._save_state()
         return _paper_exchange
 
 

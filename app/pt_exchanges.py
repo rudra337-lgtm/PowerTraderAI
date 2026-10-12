@@ -19,6 +19,7 @@ from pt_exchange_abstraction import (
     ConnectionTestResult,
     ExchangeType,
     MarketData,
+    MarketNotFound,
     OrderResult,
 )
 
@@ -217,6 +218,8 @@ class BinanceExchange(AbstractExchange):
     base URLs are selected via the ``testnet`` constructor flag so the
     multi-broker selector (#96) can flip the toggle per user preference.
     """
+
+    SUPPORTS_LIVE_ORDERS = True
 
     def __init__(
         self,
@@ -1104,7 +1107,7 @@ class CoinbaseExchange(AbstractExchange):
         data = response.json()
         if "message" in data:
             if str(data["message"]).lower() == "notfound":
-                raise RuntimeError(
+                raise MarketNotFound(
                     f"Coinbase has no market {coinbase_symbol} (NotFound)"
                 )
             raise RuntimeError(

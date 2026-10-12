@@ -414,8 +414,8 @@ def close_hub(hub):
 def launch(hub, coin):
     """Start training ``coin`` through the hub's own method (as the Trainers
     tab does). Returns the hub's new LogProc, or None if the hub did not keep
-    the process (it drops one that exits within its 0.5 s start-up check and
-    leaves any earlier process for the coin in place)."""
+    the process (it starts nothing when the launch is refused or the trainer is
+    missing, and leaves any earlier, still running process for the coin in place)."""
     previous = hub.trainers.get(coin)
     hub.trainer_coin_var.set(coin)
     hub.start_trainer_for_selected_coin()

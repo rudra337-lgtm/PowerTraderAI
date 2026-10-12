@@ -19,6 +19,13 @@ logger = logging.getLogger("pt_exchange_abstraction")
 _CREDENTIAL_KWARGS = ("api_key", "api_secret", "passphrase", "private_key")
 
 
+class MarketNotFound(RuntimeError):
+    """The exchange has no market for the symbol (e.g. Coinbase and XMR).
+
+    Unlike a network error, retrying cannot help, so callers can skip the coin
+    instead of retrying for ever."""
+
+
 class ExchangeType(Enum):
     """Supported exchange types"""
 
@@ -223,6 +230,10 @@ class ExchangeRegion(Enum):
 
 class AbstractExchange(abc.ABC):
     """Abstract base class for all exchange implementations"""
+
+    # True only for connectors that really read balances and place orders. Most
+    # connectors raise NotImplementedError for both and can serve prices only.
+    SUPPORTS_LIVE_ORDERS = False
 
     def __init__(self, api_key: str = "", api_secret: str = "", **kwargs):
         self.api_key = api_key

@@ -11,6 +11,13 @@ for data feeds while maintaining backward compatibility.
 import os
 from typing import List, Optional, Tuple, Union
 
+try:
+    from pt_exchange_abstraction import MarketNotFound
+except Exception:  # the exchange layer is optional here
+
+    class MarketNotFound(RuntimeError):
+        """The data source has no market for the symbol."""
+
 
 class DataProvider:
     """
@@ -44,9 +51,14 @@ class DataProvider:
                 config_manager = ExchangeConfigManager()
                 self.multi_exchange = MultiExchangeManager(config_manager)
 
-                # Use configured region or environment variable
-                user_region = config.get(
-                    "user_region", os.environ.get("POWERTRADER_USER_REGION", "GLOBAL")
+                # Region: the environment variable, else the shared exchange config
+                # (trading_config.json, which Settings saves), else the old file.
+                shared = config_manager.load_config()
+                user_region = (
+                    os.environ.get("POWERTRADER_USER_REGION")
+                    or (shared.user_region if shared else None)
+                    or config.get("user_region")
+                    or "GLOBAL"
                 )
                 if self.multi_exchange.initialize(user_region):
                     self.initialized = True
@@ -121,6 +133,8 @@ class DataProvider:
             try:
                 # Get data from user's configured exchanges
                 return self._get_multi_exchange_kline(symbol, timeframe, **kwargs)
+            except MarketNotFound:
+                raise  # permanent (no such market): callers skip the coin
             except Exception as e:
                 print(f"Multi-exchange system failed: {e}")
                 raise RuntimeError("Multi-exchange system failed")
@@ -132,25 +146,25 @@ class DataProvider:
         Get historical candlestick/kline data for a cryptocurrency.
 
         Args:
-            coin: Cryptocurrency symbol (e.g., "BTC", "ETH")
-            timeframe: Time interval (e.g., "1hour", "1day")
-            **kwargs: Additional parameters like limit, startAt, endAt
+            coin: Cryptocurrency symbol (e.g., "BTC", "BTC-USDT")
+            timeframe: Time interval (e.g., "1hour", "1day", "1week")
+            **kwargs: Ignored (kept for older callers)
 
         Returns:
-            String representation of historical kline data
+            JSON rows, newest first: the forming bar, then the last few closed
+            bars, each [open_time_s, open, close, high, low, volume, turnover]
 
         Raises:
-            RuntimeError: If no data providers are available
+            MarketNotFound: the source lists no such market
+            CandleDataError: the candles could not be read
         """
-        # Convert coin to standard trading pair format
-        # Handle different exchange symbol formats
-        symbol = self._normalize_symbol(coin)
+        # Real recent candles from the pattern trainer's source (Binance spot
+        # <COIN>USDT), newest first in the KuCoin row order the neural runner
+        # parses. Independent of the multi-exchange connection, which only
+        # supplies current prices. MarketNotFound passes through.
+        from market_data.runner_history import kucoin_text
 
-        # Default to getting more historical data if not specified
-        if "limit" not in kwargs:
-            kwargs["limit"] = 1000
-
-        return self.get_kline_data(symbol, timeframe, **kwargs)
+        return kucoin_text(coin, timeframe)
 
     def get_ticker_data(self, symbol: str) -> str:
         """
@@ -225,6 +239,8 @@ class DataProvider:
             current_time = int(time.time() * 1000)
             kline_data = f"[[{current_time}, {price}, {price}, {price}, {price}, 1000]]"
             return kline_data
+        except MarketNotFound:
+            raise
         except Exception as e:
             raise RuntimeError(f"Multi-exchange kline data failed: {e}")
 

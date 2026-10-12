@@ -764,5 +764,223 @@ class UiHelperTests(unittest.TestCase):
         self.assertEqual(indicator.cget("text"), "MODE: LIVE — kraken")
 
 
+class PaperBookFileTests(unittest.TestCase):
+    """The paper book on disk: the Settings > Paper Account window writes it with
+    these helpers and the trader loads it at start-up (one shared format)."""
+
+    def setUp(self):
+        tm.reset_paper_exchange()
+        self.addCleanup(tm.reset_paper_exchange)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.hub = tmp.name
+        self.path = tm.paper_book_path(self.hub)
+
+    def write_raw(self, text):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_paths_are_the_ones_the_trader_uses(self):
+        self.assertEqual(
+            self.path, os.path.join(self.hub, "paper", "paper_account.json")
+        )
+        self.assertEqual(
+            tm.paper_ledger_path(self.hub),
+            os.path.join(self.hub, "paper", "pnl_ledger.json"),
+        )
+
+    def test_a_written_book_is_what_the_trader_loads(self):
+        book = tm.validate_paper_book("50", "40", {"btc": ("0.001", "60000")})
+        tm.write_paper_book(self.path, book)
+        self.assertFalse(os.path.exists(self.path + ".tmp"))
+        ex = tm.PaperExchange(
+            price_feed=lambda base: fresh_quote(), state_path=self.path
+        )
+        self.assertEqual(ex.account.initial_balance, tm.Decimal("50"))
+        self.assertEqual(ex.account.cash_balance, tm.Decimal("40"))
+        self.assertEqual(ex.account.positions["BTC"].quantity, tm.Decimal("0.001"))
+        self.assertEqual(ex.account.positions["BTC"].average_price, tm.Decimal("60000"))
+        again = tm.read_paper_book(self.path)
+        self.assertEqual(again, book)
+
+    def test_invalid_values_are_refused_with_a_reason(self):
+        good = {"BTC": ("1", "100")}
+        cases = [
+            (("0", "10", good), "starting balance must be more than 0"),
+            (("-5", "10", good), "starting balance must be more than 0"),
+            (("abc", "10", good), "starting balance must be a number"),
+            (("nan", "10", good), "starting balance must be a number"),
+            (("10", "-1", good), "cash balance cannot be negative"),
+            (("10", "10", {"B": ("1", "1")}), "not a coin symbol"),
+            (("10", "10", {"BTC1": ("1", "1")}), "not a coin symbol"),
+            (("10", "10", {"USDT": ("1", "1")}), "is cash, not a coin"),
+            (("10", "10", {"BTC": ("0", "1")}), "quantity of BTC must be more than 0"),
+            (("10", "10", {"BTC": ("1", "0")}), "average price of BTC must be more"),
+            (("10", "10", {"BTC": ("1e10", "1")}), "too large"),
+            (("10", "10", {"btc": ("1", "1"), "BTC": ("2", "2")}), "listed twice"),
+        ]
+        for (initial, cash, positions), expected in cases:
+            with self.subTest(expected=expected, initial=initial, cash=cash):
+                with self.assertRaises(tm.PaperBookError) as cm:
+                    tm.validate_paper_book(initial, cash, positions)
+                self.assertIn(expected, str(cm.exception))
+
+    def test_missing_is_none_and_unreadable_is_an_error(self):
+        self.assertIsNone(tm.read_paper_book(self.path))
+        for text in (
+            "{",
+            '{"positions": {}}',
+            '{"cash_balance": "5", "positions": [1]}',
+        ):
+            with self.subTest(text=text):
+                self.write_raw(text)
+                with self.assertRaises(tm.PaperBookError):
+                    tm.read_paper_book(self.path)
+        self.write_raw('{"cash_balance": "5", "positions": null}')
+        self.assertEqual(tm.read_paper_book(self.path).positions, {})
+
+    def test_a_bad_hand_edit_does_not_crash_the_trader_start(self):
+        # "positions": a list used to raise AttributeError out of load_state
+        self.write_raw('{"cash_balance": "5", "positions": [1]}')
+        ex = tm.PaperExchange(
+            price_feed=lambda base: fresh_quote(), state_path=self.path
+        )
+        self.assertEqual(ex.account.cash_balance, tm.DEFAULT_PAPER_BALANCE)
+
+    def test_trader_start_saves_a_new_book_and_keeps_a_saved_one(self):
+        tm.configure_paper_exchange(state_path=self.path, price_feed=None)
+        with open(self.path, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        self.assertEqual(
+            saved,
+            {"initial_balance": "10000", "cash_balance": "10000", "positions": {}},
+        )
+        # a readable book is loaded and left exactly as it was, even an invalid one
+        for text in (
+            '{"initial_balance": "50", "cash_balance": "50", "positions": {}}',
+            '{"initial_balance": "0", "cash_balance": "50", "positions": {}}',
+        ):
+            with self.subTest(text=text):
+                self.write_raw(text)
+                ex = tm.configure_paper_exchange(state_path=self.path, price_feed=None)
+                self.assertTrue(ex.state_loaded)
+                self.assertEqual(ex.account.cash_balance, tm.Decimal("50"))
+                with open(self.path, "r", encoding="utf-8") as f:
+                    self.assertEqual(f.read(), text)
+
+    def test_an_unreadable_book_is_kept_aside_not_overwritten(self):
+        # before: the first paper order silently replaced it with a $10,000 book
+        self.write_raw("{ not json")
+        ex = tm.configure_paper_exchange(state_path=self.path, price_feed=None)
+        self.assertFalse(ex.state_loaded)
+        folder = os.path.dirname(self.path)
+        (kept,) = [
+            n for n in os.listdir(folder) if n.startswith("paper_account.json.bad-")
+        ]
+        with open(os.path.join(folder, kept), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "{ not json")
+        self.assertEqual(
+            tm.read_paper_book(self.path).cash_balance, tm.Decimal("10000")
+        )
+
+    def test_unreadable_and_invalid_books_are_told_apart(self):
+        # unreadable: the trader cannot load it either
+        for text in ("{", '{"positions": {}}', '{"cash_balance": "1,000"}'):
+            with self.subTest(text=text):
+                self.write_raw(text)
+                with self.assertRaises(tm.PaperBookUnreadable):
+                    tm.read_paper_book(self.path)
+                ex = tm.PaperExchange(price_feed=None, state_path=self.path)
+                self.assertFalse(ex.state_loaded)
+        # invalid: the trader loads it as written, the window will not save it
+        self.write_raw('{"initial_balance": "0", "cash_balance": "50"}')
+        with self.assertRaises(tm.PaperBookInvalid):
+            tm.read_paper_book(self.path)
+        ex = tm.PaperExchange(price_feed=None, state_path=self.path)
+        self.assertTrue(ex.state_loaded)
+
+    def test_commas_are_thousands_separators_only(self):
+        book = tm.validate_paper_book("10,000.5", "1,000", {"BTC": ("1", "60,000")})
+        self.assertEqual(
+            (book.initial_balance, book.cash_balance, book.positions["BTC"][1]),
+            (tm.Decimal("10000.5"), tm.Decimal("1000"), tm.Decimal("60000")),
+        )
+        for value in ("0,5", "1,5", "10,00", "1,000,0"):
+            with self.subTest(value=value):
+                with self.assertRaises(tm.PaperBookInvalid) as cm:
+                    tm.validate_paper_book("100", value, {})
+                self.assertIn("use a dot for decimals", str(cm.exception))
+
+    def test_a_sell_that_reduces_a_position_is_never_too_big(self):
+        # a position worth far more than 10% of the account can still be closed
+        book = tm.validate_paper_book("110", "10", {"BTC": ("1", "100")})
+        tm.write_paper_book(self.path, book)
+        ex = tm.PaperExchange(
+            price_feed=lambda base: fresh_quote(), state_path=self.path
+        )
+        result = ex.place_order("BTC-USD", "sell", 1.0)
+        self.assertEqual(result.status, "filled")
+        self.assertEqual(ex.get_balance().get("BTC", 0.0), 0.0)
+
+    def test_ledger_positions_follow_the_book(self):
+        ledger = tm.paper_ledger_path(self.hub)
+        os.makedirs(os.path.dirname(ledger), exist_ok=True)
+        with open(ledger, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "total_realized_profit_usd": 12.5,
+                    "open_positions": {"ETH": {"usd_cost": 9.0, "qty": 3.0}},
+                    "pending_orders": {"old-order": {}},
+                    "kept": 1,
+                },
+                f,
+            )
+        book = tm.validate_paper_book("100", "50", {"BTC": ("0.5", "100")})
+        tm.write_paper_ledger_positions(ledger, book)
+        with open(ledger, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(
+            data["open_positions"], {"BTC": {"usd_cost": 50.0, "qty": 0.5}}
+        )
+        self.assertEqual(data["pending_orders"], {})
+        self.assertEqual((data["total_realized_profit_usd"], data["kept"]), (12.5, 1))
+        tm.write_paper_ledger_positions(ledger, book, reset_realized=True)
+        with open(ledger, "r", encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["total_realized_profit_usd"], 0.0)
+
+    def test_an_untouched_position_keeps_the_ledgers_own_cost(self):
+        # the trader's cost includes the buy commission; a cash-only edit keeps it
+        ledger = tm.paper_ledger_path(self.hub)
+        os.makedirs(os.path.dirname(ledger), exist_ok=True)
+        with open(ledger, "w", encoding="utf-8") as f:
+            json.dump({"open_positions": {"BTC": {"usd_cost": 50.05, "qty": 0.5}}}, f)
+        book = tm.validate_paper_book("100", "75", {"BTC": ("0.5", "100")})
+        tm.write_paper_ledger_positions(ledger, book, keep_cost=["BTC"])
+        with open(ledger, "r", encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["open_positions"]["BTC"]["usd_cost"], 50.05)
+        changed = tm.validate_paper_book("100", "75", {"BTC": ("0.6", "100")})
+        tm.write_paper_ledger_positions(ledger, changed, keep_cost=["BTC"])
+        with open(ledger, "r", encoding="utf-8") as f:
+            self.assertEqual(
+                json.load(f)["open_positions"]["BTC"], {"usd_cost": 60.0, "qty": 0.6}
+            )
+
+    def test_backup_renames_the_paper_history_and_deletes_nothing(self):
+        folder = os.path.join(self.hub, "paper")
+        os.makedirs(folder)
+        for name in tm.PAPER_HISTORY_FILES:
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
+                f.write(name)
+        moved = tm.backup_paper_history(self.hub, stamp="20261009-120000")
+        self.assertEqual(len(moved), len(tm.PAPER_HISTORY_FILES))
+        for name in tm.PAPER_HISTORY_FILES:
+            self.assertFalse(os.path.exists(os.path.join(folder, name)))
+            with open(
+                os.path.join(folder, f"{name}.bak-20261009-120000"), encoding="utf-8"
+            ) as f:
+                self.assertEqual(f.read(), name)
+
+
 if __name__ == "__main__":
     unittest.main()
