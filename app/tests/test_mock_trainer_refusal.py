@@ -109,7 +109,9 @@ def mock_hub(monkeypatch, records):
     ht.configure_trainer(script="pt_trainer.py")
     hub = ht.build_real_hub(monkeypatch)
     hub.test_neural_stops = []
-    monkeypatch.setattr(hub, "stop_neural", lambda: hub.test_neural_stops.append(1))
+    monkeypatch.setattr(
+        hub, "stop_neural", lambda **kwargs: hub.test_neural_stops.append(1)
+    )
     yield hub
     ht.close_hub(hub)
     assert hub.test_callback_errors == []
@@ -154,7 +156,7 @@ def test_allowing_mocks_takes_effect_at_the_next_launch_without_a_restart(
         ht.wait(lp, timeout=120)
 
     assert len(refusals(hub)) == 1  # no second refusal
-    assert hub.test_neural_stops == [1]
+    assert hub.test_neural_stops == []  # training no longer stops the runner
     (record,) = [r for r in ht.child_records(records) if r.get("final")]
     assert record["orig_argv"][1:] == ["-u", "-W", "ignore", MOCK, "BTC"]
 

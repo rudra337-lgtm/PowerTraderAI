@@ -3851,10 +3851,19 @@ class PowerTraderHub(tk.Tk):
                     time.sleep(0.05)
                     continue
                 q.put(f"{prefix}{line.rstrip()}")
-        except Exception:
-            pass
+        except Exception as exc:
+            q.put(f"{prefix}[log reader stopped: {exc}]")
         finally:
-            q.put(f"{prefix}[process exited]")
+            q.put(f"{prefix}[process exited{self._exit_note(proc)}]")
+
+    @staticmethod
+    def _exit_note(proc: subprocess.Popen) -> str:
+        """', code N' once the process has ended, else a note that it still runs."""
+        try:
+            code = proc.wait(timeout=2)
+        except Exception:
+            return " - log lost, the process may still be running"
+        return f", code {code}"
 
     def _start_process(
         self, p: ProcInfo, log_q: Optional["queue.Queue[str]"] = None, prefix: str = ""
@@ -5162,7 +5171,12 @@ Platform: {sys.platform}
             self.proc_trader, log_q=self.trader_log_q, prefix="[TRADER] "
         )
 
-    def stop_neural(self) -> None:
+    def stop_neural(self, reason: str = "stopped with the ■ button") -> None:
+        if self.proc_neural.proc and self.proc_neural.proc.poll() is None:
+            try:
+                self.runner_log_q.put(f"[RUNNER] [{reason}]")
+            except Exception:
+                pass
         self._stop_process(self.proc_neural)
 
     def stop_trader(self) -> None:
@@ -5522,10 +5536,19 @@ Platform: {sys.platform}
         print(f"DEBUG: start_trainer_for_selected_coin() completed")
 
     def train_all_coins(self) -> None:
-        # Start trainers for every coin (in parallel)
-        print(f"DEBUG: Starting training for coins: {self.coins}")
         if not self._trainer_launch_allowed("all coins"):
             return  # one refusal message, not one per coin
+        trained = [c for c in self.coins if self._coin_is_trained(c)]
+        if trained and not messagebox.askyesno(
+            "Train all coins?",
+            f"Train all {len(self.coins)} coins now?\n\n"
+            f"This deletes the current models of {', '.join(trained)}. The runner "
+            "skips each coin until its new model is saved.",
+            parent=self,
+        ):
+            return
+        # Start trainers for every coin (in parallel)
+        print(f"DEBUG: Starting training for coins: {self.coins}")
         for c in self.coins:
             print(f"DEBUG: Training coin: {c}")
             self.trainer_coin_var.set(c)
@@ -5555,6 +5578,7 @@ Platform: {sys.platform}
                     print(f"DEBUG: Trainer for {coin} already stopped")
             except Exception as e:
                 print(f"DEBUG: Error stopping trainer for {coin}: {e}")
+            self._mark_training_ended(coin, self._exit_code(lp))
 
         # Clear the trainers dictionary
         self.trainers.clear()
@@ -5606,6 +5630,7 @@ Platform: {sys.platform}
                     print(f"DEBUG: Force killing trainer for {coin}")
                     lp.info.proc.kill()
 
+                self._mark_training_ended(coin, self._exit_code(lp))
                 # Remove from trainers dictionary
                 del self.trainers[coin]
 
@@ -5657,14 +5682,12 @@ Platform: {sys.platform}
             print(f"DEBUG: No coin in trainer_coin_var, returning")
             return
 
-        # A mock trainer is refused before anything is stopped or deleted (FDS-MDL).
+        # A mock trainer is refused before anything is deleted (FDS-MDL).
         if not self._trainer_launch_allowed(coin):
             return
 
-        print(f"DEBUG: About to stop neural runner before training {coin}")
-        # Stop the Neural Runner before any training starts (training modifies artifacts the runner reads)
-        self.stop_neural()
-        print(f"DEBUG: Neural runner stopped, continuing with training setup")
+        # The Neural Runner keeps running: removing the coin's training stamp
+        # (below) makes it skip this coin until the new model is complete.
 
         # --- IMPORTANT ---
         # Match the trader's folder convention:
@@ -5707,13 +5730,25 @@ Platform: {sys.platform}
             ]
 
             deleted = 0
+            deadline = time.time() + 1.0
             for pat in patterns:
                 for fp in glob.glob(os.path.join(coin_cwd, pat)):
-                    try:
-                        os.remove(fp)
-                        deleted += 1
-                    except Exception:
-                        pass
+                    while True:
+                        try:
+                            os.remove(fp)
+                            deleted += 1
+                            break
+                        except FileNotFoundError:
+                            break
+                        except OSError as exc:
+                            # 32: open in another process (e.g. the runner reading it)
+                            if getattr(exc, "winerror", None) != 32:
+                                break
+                            if time.time() >= deadline:
+                                break
+                            time.sleep(0.05)
+            # the coin is untrained until the new run finishes, here as in the runner
+            getattr(self, "last_training_times", {}).pop(coin, None)
 
             if deleted:
                 try:
@@ -5753,20 +5788,8 @@ Platform: {sys.platform}
                 bufsize=1,
             )
             print(f"DEBUG: Process started with PID: {info.proc.pid}")
-            # Give it a moment to start and check if it's still running
-            time.sleep(0.5)
-            if info.proc.poll() is not None:
-                print(
-                    f"DEBUG: Process {info.proc.pid} already terminated with exit code: {info.proc.returncode}"
-                )
-                try:
-                    stdout, stderr = info.proc.communicate(timeout=1)
-                    print(f"DEBUG: Process output: {stdout}")
-                    if stderr:
-                        print(f"DEBUG: Process stderr: {stderr}")
-                except (TimeoutError, OSError):
-                    pass
-                return  # Don't register a failed process
+            # A trainer that stops at once (e.g. exit 2: its folder still holds
+            # model files) is kept too, so its output and exit code reach the log.
 
             t = threading.Thread(
                 target=self._reader_thread,
@@ -5778,6 +5801,11 @@ Platform: {sys.platform}
             self.trainers[coin] = LogProc(
                 info=info, log_q=q, thread=t, is_trainer=True, coin=coin
             )
+            if self.proc_neural.proc and self.proc_neural.proc.poll() is None:
+                self.runner_log_q.put(
+                    f"[RUNNER] [training {coin}: the runner skips {coin} until "
+                    "its new model is saved]"
+                )
 
             # Add periodic monitoring to see when process exits
             self.after(1000, lambda c=coin: self._monitor_trainer_process(c))
@@ -5785,6 +5813,33 @@ Platform: {sys.platform}
             messagebox.showerror(
                 "Failed to start", f"Trainer for {coin} failed to start:\n{e}"
             )
+
+    @staticmethod
+    def _exit_code(lp):
+        """A stopped trainer's exit code, once it has ended (None if unknown)."""
+        try:
+            return lp.info.proc.wait(timeout=2)
+        except Exception:
+            return None
+
+    def _mark_training_ended(self, coin: str, code) -> None:
+        """A stopped or crashed trainer can leave trainer_status.json at TRAINING;
+        record how it ended so neither the hub nor the runner waits on it."""
+        path = os.path.join(self.coin_folders.get(coin, ""), "trainer_status.json")
+        try:
+            st = _safe_read_json(path)
+            if isinstance(st, dict) and str(st.get("state", "")).upper() == "TRAINING":
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "state": "STOPPED",
+                            "exit_code": code,
+                            "timestamp": time.time(),
+                        },
+                        f,
+                    )
+        except Exception:
+            pass
 
     def _monitor_trainer_process(self, coin: str) -> None:
         """Monitor a specific trainer process and log when it exits"""
@@ -5805,6 +5860,8 @@ Platform: {sys.platform}
                         )
                         # Schedule auto-retrain if enabled
                         self._schedule_auto_retrain(coin)
+                    else:
+                        self._mark_training_ended(coin, proc.returncode)
 
                     # Try to get any remaining output
                     try:
@@ -6054,7 +6111,7 @@ Platform: {sys.platform}
 
     def _get_status_border_color(self, status: str, coin: str = None) -> str:
         """Get border color based on training status and recency"""
-        if status == "✓":
+        if status in ("✅", "✓"):  # _training_status_map marks trained coins ✅
             # Check if training was recent (within last 2 hours = fresh green)
             if coin and self._is_recently_trained(coin, hours_threshold=2):
                 return "#4CAF50"  # Bright green for recently completed
@@ -6109,12 +6166,31 @@ Platform: {sys.platform}
                 is_running = self._is_trainer_running(coin_name)
 
                 if is_running:
+                    if not messagebox.askyesno(
+                        f"Stop training {coin_name}?",
+                        f"{coin_name} is training. Stop it now?\n\n"
+                        f"{coin_name} stays untrained until it is trained again.",
+                        parent=self,
+                    ):
+                        return
                     # Stop training if running
                     print(f"DEBUG: Stopping training for {coin_name}")
                     self.trainer_coin_var.set(coin_name)
                     self.stop_trainer_for_selected_coin()
                     print(f"DEBUG: Training stopped for {coin_name}")
                 else:
+                    if not self._trainer_launch_allowed(coin_name):
+                        return
+                    if self._coin_is_trained(coin_name) and not messagebox.askyesno(
+                        f"Retrain {coin_name}?",
+                        f"{coin_name} is already trained "
+                        f"({self._get_training_hours(coin_name)} ago).\n\n"
+                        f"Retraining deletes its current model files. The runner "
+                        f"skips {coin_name} until the new model is saved.\n\n"
+                        "Retrain now?",
+                        parent=self,
+                    ):
+                        return
                     # Start training if not running
                     print(f"DEBUG: Starting training for {coin_name}")
                     # Set the dropdown to this coin
@@ -6197,7 +6273,7 @@ Platform: {sys.platform}
         """Cancel all scheduled auto-retraining timers."""
         for coin, timer_id in self.auto_retrain_timers.items():
             try:
-                self.master.after_cancel(timer_id)
+                self.after_cancel(timer_id)  # the hub is the Tk root: no .master
                 print(f"DEBUG: Cancelled auto-retrain timer for {coin}")
             except Exception:
                 pass
@@ -6220,7 +6296,7 @@ Platform: {sys.platform}
         # Cancel all auto-retrain timers
         self.cancel_all_auto_retrains()
 
-        self.stop_neural()
+        self.stop_neural(reason="stopped: the hub is closing")
         self.stop_trader()
 
         # Also reset the runner-ready gate file (best-effort)

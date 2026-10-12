@@ -661,6 +661,16 @@ def _current_price(sym: str) -> float:
     return price
 
 
+def _training_in_progress(sym: str) -> bool:
+    """The pattern trainer marks trainer_status.json TRAINING while it runs."""
+    try:
+        path = os.path.join(coin_folder(sym), "trainer_status.json")
+        with open(path, encoding="utf-8") as f:
+            return str(json.load(f).get("state", "")).upper() == "TRAINING"
+    except Exception:
+        return False
+
+
 # Coins skipped because the data source has no market for them (symbol -> reason).
 # They get no signals and do not hold up "runner ready" (which gates the trader).
 UNAVAILABLE_COINS = {}
@@ -812,6 +822,16 @@ def init_coin(sym: str):
     states[sym] = st
 
 
+def _reset_coin_state(sym: str) -> Dict[str, Any]:
+    """Discard the coin's predictions and bounds (they belong to a model that is
+    gone or replaced); keep its candle times."""
+    tf_times = states.get(sym, {}).get("tf_times", [])
+    st = states[sym] = new_coin_state()
+    st["tf_times"] = tf_times
+    _ready_coins.discard(sym)
+    return st
+
+
 def step_coin(sym: str):
     # run inside the coin folder so all existing file reads/writes stay relative + isolated
     os.chdir(coin_folder(sym))
@@ -841,12 +861,15 @@ def step_coin(sym: str):
                 f.write("0")
         except Exception:
             pass
+        _reset_coin_state(sym)
         try:
-            display_cache[sym] = sym + (
-                "  (NOT TRAINED / OUTDATED - run trainer)"
-                if not trained
-                else "  (MODEL NOT VERIFIED - no matching manifest; retrain)"
-            )
+            if trained:
+                held = "  (MODEL NOT VERIFIED - no matching manifest; retrain)"
+            elif _training_in_progress(sym):
+                held = "  (TRAINING - no signals until the new model is saved)"
+            else:
+                held = "  (NOT TRAINED / OUTDATED - run trainer)"
+            display_cache[sym] = sym + held
         except Exception:
             pass
         try:
@@ -862,6 +885,13 @@ def step_coin(sym: str):
         except Exception:
             pass
         return
+
+    # A new model starts from placeholders, as after a runner restart: its first
+    # sweep writes no LONG/SHORT and does not mark the coin ready.
+    model_id = (_verified_models.get(sym, (None, None))[1] or {}).get("model_id")
+    if st.get("model_id") != model_id:
+        st = _reset_coin_state(sym)
+        st["model_id"] = model_id
 
     # ensure new readiness-version keys exist even if restarting from an older state dict
     if "bounds_version" not in st:

@@ -249,6 +249,23 @@ def test_one_coins_error_does_not_stop_the_runner(runner, monkeypatch, capsys):
 # --- the hub --------------------------------------------------------------------
 
 
+def test_a_stopped_trainer_is_not_left_marked_training(tmp_path):
+    folder = str(tmp_path)
+    path = os.path.join(folder, "trainer_status.json")
+    with open(path, "w") as f:
+        json.dump({"state": "TRAINING"}, f)
+    hub = types.SimpleNamespace(coin_folders={"BTC": folder})
+    pt_hub.PowerTraderHub._mark_training_ended(hub, "BTC", 1)
+    with open(path) as f:
+        assert json.load(f)["state"] == "STOPPED"
+    # a finished status is left alone
+    with open(path, "w") as f:
+        json.dump({"state": "FINISHED"}, f)
+    pt_hub.PowerTraderHub._mark_training_ended(hub, "BTC", 1)
+    with open(path) as f:
+        assert json.load(f)["state"] == "FINISHED"
+
+
 def test_recent_candles_are_fetched_again_once_the_bar_closes():
     forming = NOW - NOW % HOUR
     fake = FakeKlines(hour_rows())
@@ -258,3 +275,46 @@ def test_recent_candles_are_fetched_again_once_the_bar_closes():
     clock[0] = forming + HOUR + 5  # inside the ttl, but the bar has closed
     candles.kucoin_text("BTC", "1hour")
     assert len(fake.calls) == 2
+
+
+class StopStep(Exception):
+    pass
+
+
+def test_a_new_model_starts_from_placeholders(runner, monkeypatch):
+    st = runner.states["BTC"] = runner.new_coin_state()
+    st.update(
+        model_id="old",
+        low_bound_prices=[123.0] * 7,
+        bounds_version=3,
+        last_display_bounds_version=3,
+        tf_choice_index=4,
+        tf_times=["t"] * 7,
+    )
+    runner._ready_coins.add("BTC")
+    monkeypatch.setattr(runner, "_coin_is_trained", lambda sym: True)
+    monkeypatch.setattr(runner, "_model_verified", lambda sym: True)
+    monkeypatch.setitem(runner._verified_models, "BTC", (None, {"model_id": "new"}))
+
+    def stop(coin, tf):
+        raise StopStep(tf)
+
+    monkeypatch.setattr(runner, "_last_closed_bar", stop)
+    with pytest.raises(StopStep, match="1hour"):  # the sweep starts again at 1hour
+        runner.step_coin("BTC")
+    st = runner.states["BTC"]
+    assert st["model_id"] == "new"
+    assert st["low_bound_prices"] == [0.01] * 7
+    assert (st["bounds_version"], st["last_display_bounds_version"]) == (0, -1)
+    assert st["tf_times"] == ["t"] * 7
+    assert "BTC" not in runner._ready_coins
+
+
+def test_a_held_coin_forgets_its_predictions(runner):
+    os.makedirs(runner.coin_folder("SOL"), exist_ok=True)
+    st = runner.states["SOL"] = runner.new_coin_state()
+    st.update(low_bound_prices=[5.0] * 7, bounds_version=2, tf_times=["x"] * 7)
+    runner.step_coin("SOL")  # no training stamp: held
+    st = runner.states["SOL"]
+    assert st["low_bound_prices"] == [0.01] * 7 and st["bounds_version"] == 0
+    assert st["tf_times"] == ["x"] * 7
