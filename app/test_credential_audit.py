@@ -212,29 +212,25 @@ class TestCredentialAudit(unittest.TestCase):
             self.assertIsNone(mgr.decrypt_credentials())
             self.assertFalse(mgr.has_encrypted_credentials())
 
-    def test_pt_hub_uses_encrypt_credentials(self):
+    def test_pt_hub_never_opens_credential_files(self):
         """
-        pt_hub.py must call encrypt_credentials and must NOT write
-        r_key.txt / r_secret.txt directly. Verified via AST.
+        pt_hub.py must not open r_key.txt / r_secret.txt in any mode. The hub no
+        longer handles Robinhood credentials itself (its Settings wizard was
+        removed); keys are entered in Configure Exchange APIs. Verified via AST.
         """
         fpath = os.path.join(APP_DIR, "pt_hub.py")
-        with open(fpath, "r", errors="ignore") as f:
-            content = f.read()
-        self.assertIn("encrypt_credentials", content)
+        hits = _ast_cred_opens(fpath, modes=None)
+        self.assertEqual(hits, [], f"pt_hub.py opens credential files: {hits}")
 
-        write_hits = _ast_cred_opens(fpath, modes={"w", "wb"})
-        self.assertEqual(
-            write_hits,
-            [],
-            f"pt_hub.py has direct credential writes: {write_hits}",
-        )
-
-    def test_pt_hub_reads_via_secure_manager(self):
-        """pt_hub.py must reference decrypt_credentials for reading."""
-        fpath = os.path.join(APP_DIR, "pt_hub.py")
-        with open(fpath, "r", errors="ignore") as f:
-            content = f.read()
-        self.assertIn("decrypt_credentials", content)
+    def test_exchange_credentials_are_stored_through_pt_secrets(self):
+        """Keys typed into Configure Exchange APIs (exchange_config_gui.py) go to
+        the OS credential store through pt_secrets (pt_multi_exchange), not to files."""
+        gui = os.path.join(APP_DIR, "exchange_config_gui.py")
+        with open(gui, "r", errors="ignore") as f:
+            self.assertIn("update_exchange_credentials", f.read())
+        self.assertEqual(_ast_cred_opens(gui, modes=None), [])
+        with open(os.path.join(APP_DIR, "pt_multi_exchange.py"), errors="ignore") as f:
+            self.assertIn("pt_secrets.set_credentials", f.read())
 
     def test_unparse_fallback_handles_string_constant(self):
         """_unparse_node must return the string value for ast.Constant nodes."""
