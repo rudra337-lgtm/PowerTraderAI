@@ -119,8 +119,9 @@ def test_the_log_shows_the_exit_code():
 
 def test_a_trained_coin_is_shown_as_trained():
     hub = types.SimpleNamespace(_is_recently_trained=lambda coin, hours_threshold: True)
-    assert Hub._get_status_border_color(hub, "✅", "BTC") == "#4CAF50"
-    assert Hub._get_status_border_color(hub, "❌", "BTC") == "#F44336"
+    assert Hub._get_status_border_color(hub, "✅", "BTC") == pt_hub.STATUS_GREEN
+    assert Hub._get_status_border_color(hub, "●", "BTC") == pt_hub.STATUS_AMBER
+    assert Hub._get_status_border_color(hub, "❌", "BTC") == pt_hub.STATUS_IDLE
 
 
 def click_hub(trained, running=False, allowed=True):

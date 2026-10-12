@@ -209,9 +209,10 @@ except ImportError:
 
 
 class ToolTip:
-    """Simple tooltip helper for widgets."""
+    """Simple tooltip helper for widgets. ``text`` may be a string or a callable
+    returning one, which is called each time the tooltip is shown."""
 
-    def __init__(self, widget, text: str):
+    def __init__(self, widget, text):
         self.widget = widget
         self.text = text
         self.tooltip_window = None
@@ -226,13 +227,20 @@ class ToolTip:
         x = self.widget.winfo_rootx() + self.widget.winfo_width() + 5
         y = self.widget.winfo_rooty() + self.widget.winfo_height() // 2
 
+        try:
+            text = self.text() if callable(self.text) else self.text
+        except Exception:
+            return
+        if not text:
+            return
+
         self.tooltip_window = tk.Toplevel(self.widget)
         self.tooltip_window.wm_overrideredirect(True)
         self.tooltip_window.wm_geometry(f"+{x}+{y}")
 
         label = tk.Label(
             self.tooltip_window,
-            text=self.text,
+            text=text,
             background="#FFFFDD",
             foreground="#000000",
             relief="solid",
@@ -240,6 +248,8 @@ class ToolTip:
             font=("TkDefaultFont", 8),
             padx=5,
             pady=2,
+            justify="left",
+            wraplength=420,
         )
         label.pack()
 
@@ -261,6 +271,12 @@ DARK_ACCENT = "#00FF66"
 DARK_ACCENT2 = "#00E5FF"
 DARK_SELECT_BG = "#17324A"
 DARK_SELECT_FG = "#00FF66"
+
+# Status colours (coin table): idle grey, busy amber, done green; short orange.
+STATUS_IDLE = DARK_MUTED
+STATUS_AMBER = "#ffa726"
+STATUS_GREEN = "#4CAF50"
+LOG_SHORT = "#FF8A65"
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
@@ -359,198 +375,6 @@ class WrapFrame(ttk.Frame):
                 col += 1
         finally:
             self._in_reflow = False
-
-
-class NeuralSignalTile(ttk.Frame):
-    def __init__(
-        self,
-        parent: tk.Widget,
-        coin: str,
-        bar_height: int = 52,
-        levels: int = 8,
-        trade_start_level: int = 3,
-    ):
-        super().__init__(parent)
-        self.coin = coin
-
-        self._hover_on = False
-        self._normal_canvas_bg = DARK_PANEL2
-        self._hover_canvas_bg = DARK_PANEL
-        self._normal_border = DARK_BORDER
-        self._hover_border = DARK_ACCENT2
-        self._normal_fg = DARK_FG
-        self._hover_fg = DARK_ACCENT2
-
-        self._levels = max(2, int(levels))
-        self._display_levels = self._levels - 1
-
-        self._bar_h = int(bar_height)
-        self._bar_w = 12
-        self._gap = 16
-        self._pad = 6
-
-        self._base_fill = DARK_PANEL
-        self._long_fill = "blue"
-        self._short_fill = "orange"
-
-        self.title_lbl = ttk.Label(self, text=coin)
-        self.title_lbl.pack(anchor="center")
-
-        w = (self._pad * 2) + (self._bar_w * 2) + self._gap
-        h = (self._pad * 2) + self._bar_h
-
-        self.canvas = tk.Canvas(
-            self,
-            width=w,
-            height=h,
-            bg=self._normal_canvas_bg,
-            highlightthickness=2,
-            highlightbackground=self._normal_border,
-        )
-        self.canvas.pack(padx=2, pady=(2, 0))
-
-        x0 = self._pad
-        x1 = x0 + self._bar_w
-        x2 = x1 + self._gap
-        x3 = x2 + self._bar_w
-        yb = self._pad + self._bar_h
-
-        # Build segmented bars: 7 segments for levels 1..7 (level 0 is "no highlight")
-        self._long_segs: List[int] = []
-        self._short_segs: List[int] = []
-
-        for seg in range(self._display_levels):
-            # seg=0 is bottom segment (level 1), seg=display_levels-1 is top segment (level 7)
-            y_top = int(round(yb - ((seg + 1) * self._bar_h / self._display_levels)))
-            y_bot = int(round(yb - (seg * self._bar_h / self._display_levels)))
-
-            self._long_segs.append(
-                self.canvas.create_rectangle(
-                    x0,
-                    y_top,
-                    x1,
-                    y_bot,
-                    fill=self._base_fill,
-                    outline=DARK_BORDER,
-                    width=1,
-                )
-            )
-            self._short_segs.append(
-                self.canvas.create_rectangle(
-                    x2,
-                    y_top,
-                    x3,
-                    y_bot,
-                    fill=self._base_fill,
-                    outline=DARK_BORDER,
-                    width=1,
-                )
-            )
-
-        # Trade-start marker line (boundary before the trade-start level).
-        # Example: trade_start_level=3 => line after 2nd block (between 2 and 3).
-        self._trade_line_geom = (x0, x1, x2, x3, yb)
-        self._trade_line_long = self.canvas.create_line(
-            x0, yb, x1, yb, fill=DARK_FG, width=2
-        )
-        self._trade_line_short = self.canvas.create_line(
-            x2, yb, x3, yb, fill=DARK_FG, width=2
-        )
-        self._trade_start_level = 3
-        self.set_trade_start_level(trade_start_level)
-
-        self.value_lbl = ttk.Label(self, text="L:0 S:0")
-        self.value_lbl.pack(anchor="center", pady=(1, 0))
-
-        self.set_values(0, 0)
-
-    def set_hover(self, on: bool) -> None:
-        """Visually highlight the tile on hover (like a button hover state)."""
-        if bool(on) == bool(self._hover_on):
-            return
-        self._hover_on = bool(on)
-
-        try:
-            if self._hover_on:
-                self.canvas.configure(
-                    bg=self._hover_canvas_bg,
-                    highlightbackground=self._hover_border,
-                    highlightthickness=2,
-                )
-                self.title_lbl.configure(foreground=self._hover_fg)
-                self.value_lbl.configure(foreground=self._hover_fg)
-            else:
-                self.canvas.configure(
-                    bg=self._normal_canvas_bg,
-                    highlightbackground=self._normal_border,
-                    highlightthickness=2,
-                )
-                self.title_lbl.configure(foreground=self._normal_fg)
-                self.value_lbl.configure(foreground=self._normal_fg)
-        except Exception:
-            pass
-
-    def set_trade_start_level(self, level: Any) -> None:
-        """Move the marker line to the boundary before the chosen start level."""
-        self._trade_start_level = self._clamp_trade_start_level(level)
-        self._update_trade_lines()
-
-    def _clamp_trade_start_level(self, value: Any) -> int:
-        try:
-            v = int(float(value))
-        except Exception:
-            v = 3
-        # Trade starts at levels 1..display_levels (usually 1..7)
-        return max(1, min(v, self._display_levels))
-
-    def _update_trade_lines(self) -> None:
-        try:
-            x0, x1, x2, x3, yb = self._trade_line_geom
-        except Exception:
-            return
-
-        k = max(0, min(int(self._trade_start_level) - 1, self._display_levels))
-        y = int(round(yb - (k * self._bar_h / self._display_levels)))
-
-        try:
-            self.canvas.coords(self._trade_line_long, x0, y, x1, y)
-            self.canvas.coords(self._trade_line_short, x2, y, x3, y)
-        except Exception:
-            pass
-
-    def _clamp_level(self, value: Any) -> int:
-        try:
-            v = int(float(value))
-        except Exception:
-            v = 0
-        return max(0, min(v, self._levels - 1))  # logical clamp: 0..7
-
-    def _set_level(self, seg_ids: List[int], level: int, active_fill: str) -> None:
-        # Reset all segments to base
-        for rid in seg_ids:
-            self.canvas.itemconfigure(rid, fill=self._base_fill)
-
-        # Level 0 -> show nothing (no highlight)
-        if level <= 0:
-            return
-
-        # Level 1..7 -> fill from bottom up through the current level
-        idx = level - 1  # level 1 maps to seg index 0
-        if idx < 0:
-            return
-        if idx >= len(seg_ids):
-            idx = len(seg_ids) - 1
-
-        for i in range(idx + 1):
-            self.canvas.itemconfigure(seg_ids[i], fill=active_fill)
-
-    def set_values(self, long_sig: Any, short_sig: Any) -> None:
-        ls = self._clamp_level(long_sig)
-        ss = self._clamp_level(short_sig)
-
-        self.value_lbl.config(text=f"L:{ls} S:{ss}")
-        self._set_level(self._long_segs, ls, self._long_fill)
-        self._set_level(self._short_segs, ss, self._short_fill)
 
 
 # -----------------------------
@@ -1947,6 +1771,14 @@ class LogProc:
     coin: Optional[str] = None
 
 
+def _left_split_target(requested: int, total: int) -> int:
+    """Sash position for the Controls / Live Output split: what Controls asks
+    for, at least 160 px, at most half the height (450 px when that is more)
+    and never leaving Live Output less than 120 px."""
+    upper = min(max(450, total // 2), total - 120)
+    return int(max(160, min(requested + 2, upper)))
+
+
 class PowerTraderHub(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -2816,20 +2648,11 @@ class PowerTraderHub(tk.Tk):
         main_container = ttk.Frame(top_controls)
         main_container.pack(fill="both", expand=True, padx=6, pady=6)
 
-        # Configure grid weights - ensure Account column gets proper space
-        main_container.grid_rowconfigure(
-            0, weight=0, minsize=150
-        )  # Account section - compact
-        main_container.grid_rowconfigure(
-            1, weight=0, minsize=90
-        )  # Training section - compact
-        main_container.grid_rowconfigure(
-            2, weight=0, minsize=0
-        )  # Thinking section - sizes to content exactly
-        main_container.grid_columnconfigure(
-            0, weight=2, minsize=180
-        )  # Account column - wider with minimum
-        main_container.grid_columnconfigure(1, weight=3)  # Other sections column
+        # One column: Account, then Coins (training and thinking per coin); both
+        # take their natural height and the rest goes to Live Output.
+        main_container.grid_rowconfigure(0, weight=0, minsize=0)  # Account
+        main_container.grid_rowconfigure(1, weight=0, minsize=0)  # Coins
+        main_container.grid_columnconfigure(0, weight=1)
 
         # Button width and height constants
         BTN_W = 10  # Standard button width
@@ -2837,234 +2660,16 @@ class PowerTraderHub(tk.Tk):
         MINI_BTN_W = 1  # Ultra-small width for icon buttons
         MINI_BTN_H = 1  # Much smaller height for icon buttons
 
-        # Account section: row 0, column 0, 1x column wide, 2x rows high
+        # Account: a status row (trader, exchange, start/stop), then the figures
+        # as a two-column key/value grid.
         acct_box = ttk.LabelFrame(main_container, text="Account")
-        acct_box.grid(
-            row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 3), pady=(0, 3)
-        )
+        acct_box.grid(row=0, column=0, sticky="ew", pady=(0, 3))
+        acct_box.grid_columnconfigure(1, weight=1)
+        acct_box.grid_columnconfigure(3, weight=1)
 
-        # Ensure Account section has minimum size
-        acct_box.grid_propagate(False)
-        acct_box.configure(width=180, height=120)
-
-        # Account section content
-        self.lbl_acct_total_value = ttk.Label(
-            acct_box, text="Account Total: N/A", font=("TkDefaultFont", 8)
-        )
-        self.lbl_acct_total_value.pack(anchor="w", padx=4, pady=1)
-
-        self.lbl_acct_holdings_value = ttk.Label(
-            acct_box, text="Holdings Total: N/A", font=("TkDefaultFont", 8)
-        )
-        self.lbl_acct_holdings_value.pack(anchor="w", padx=4, pady=1)
-
-        self.lbl_acct_buying_power = ttk.Label(
-            acct_box, text="Buying Power: N/A", font=("TkDefaultFont", 8)
-        )
-        self.lbl_acct_buying_power.pack(anchor="w", padx=4, pady=1)
-
-        self.lbl_acct_percent_in_trade = ttk.Label(
-            acct_box, text="Percent In Trade: N/A", font=("TkDefaultFont", 8)
-        )
-        self.lbl_acct_percent_in_trade.pack(anchor="w", padx=4, pady=1)
-
-        self.lbl_acct_dca_single = ttk.Label(
-            acct_box, text="DCA Levels (single): N/A", font=("TkDefaultFont", 8)
-        )
-        self.lbl_acct_dca_single.pack(anchor="w", padx=4, pady=1)
-
-        self.lbl_acct_dca_spread = ttk.Label(
-            acct_box, text="DCA Levels (spread): N/A", font=("TkDefaultFont", 8)
-        )
-        self.lbl_acct_dca_spread.pack(anchor="w", padx=4, pady=1)
-
-        self.lbl_pnl = ttk.Label(
-            acct_box, text="Total realized: N/A", font=("TkDefaultFont", 8)
-        )
-        self.lbl_pnl.pack(anchor="w", padx=4, pady=1)
-
-        # Training section: row 0, column 1, 1x wide, 1x high
-        training_section = ttk.LabelFrame(main_container, text="Training (Coins)")
-        training_section.grid(row=0, column=1, sticky="nsew", padx=(3, 0), pady=(0, 3))
-
-        # Trading section: row 1, column 1, 1x wide, 1x high
-        trading_section = ttk.LabelFrame(main_container, text="Trading (Exchanges)")
-        trading_section.grid(row=1, column=1, sticky="nsew", padx=(3, 0), pady=(3, 3))
-
-        # Thinking section: row 2, column 0, 2x wide, 1x high
-        neural_section = ttk.LabelFrame(main_container, text="Thinking (Signals)")
-        neural_section.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
-
-        # Title row with training counter and buttons
-        training_title_row = ttk.Frame(training_section)
-        training_title_row.pack(fill="x", padx=6, pady=(1, 0))
-
-        # Training status and buttons row
-        total_coins = len(self.coins) if self.coins else 0
-        self.training_status_label = ttk.Label(
-            training_title_row,
-            text=f"0/{total_coins} running",
-            font=("TkDefaultFont", 7),
-            foreground=DARK_ACCENT2,
-        )
-        self.training_status_label.pack(side="left", pady=0)
-
-        # Compact training buttons immediately to the right of "Training"
-        # Note: TTK buttons don't support 'height' parameter, so we only use 'width'
-        stop_all_btn = ttk.Button(
-            training_title_row,
-            text="■",
-            width=MINI_BTN_W,
-            command=self.stop_all_trainers,
-        )
-        stop_all_btn.pack(side="right", padx=(0, 2), pady=0, ipady=0)
-        ToolTip(stop_all_btn, "Stop all trainers")
-
-        train_all_btn = ttk.Button(
-            training_title_row,
-            text="►",
-            width=MINI_BTN_W,
-            command=self.train_all_coins,
-        )
-        train_all_btn.pack(side="right", padx=(2, 0), pady=0, ipady=0)
-        ToolTip(train_all_btn, "Train all coins")
-
-        # Keep train_coin_var for click handlers but remove dropdown UI
-        self.train_coin_var = tk.StringVar(value=(self.coins[0] if self.coins else ""))
-
-        # Minimal spacing
-        spacing_frame = ttk.Frame(training_section)
-        spacing_frame.pack(fill="x", pady=(1, 0))
-
-        # Training status with reduced height
-        self.training_status_frame = ttk.Frame(training_section)
-        self.training_status_frame.pack(fill="x", padx=3, pady=(0, 1))
-
-        # Dictionary to store individual coin status labels
-        self.coin_status_labels = {}
-
-        # Training automation: auto-retrain timers
-        self.auto_retrain_timers = {}  # coin -> timer for auto retraining
-
-        # Neural section content
-        # Neural status with inline buttons
-        neural_row = ttk.Frame(neural_section)
-        neural_row.pack(fill="x", padx=6, pady=(6, 2))
-
-        self.lbl_neural = ttk.Label(
-            neural_row,
-            text="Thinking stopped",
-            font=("TkDefaultFont", 8),
-            foreground=DARK_ACCENT2,
-        )
-        self.lbl_neural.pack(side="left", anchor="w")
-
-        # Neural control buttons (matching Training/Trading section style) - inline with neural status
-        # Stop Neural button
-        self.btn_stop_neural = ttk.Button(
-            neural_row,
-            text="■",
-            width=MINI_BTN_W,
-            command=self.stop_neural,
-        )
-        self.btn_stop_neural.pack(side="right", padx=(0, 2), pady=0, ipady=0)
-        ToolTip(self.btn_stop_neural, "Stop neural runner")
-
-        # Start Neural button
-        self.btn_start_neural = ttk.Button(
-            neural_row,
-            text="►",
-            width=MINI_BTN_W,
-            command=self.start_neural,
-        )
-        self.btn_start_neural.pack(side="right", padx=(0, 0), pady=0, ipady=0)
-        ToolTip(self.btn_start_neural, "Start neural runner")
-
-        # Neural levels display (compact version for the section)
-        neural_levels_frame = ttk.Frame(neural_section)
-        neural_levels_frame.pack(fill="x", padx=6, pady=(0, 6))
-
-        # ttk.Label(neural_levels_frame, text="Neural Levels (0-7):").pack(anchor="w")
-
-        # Tile area - no scrollbar; canvas auto-sizes to tile content
-        neural_viewport = ttk.Frame(neural_levels_frame)
-        neural_viewport.pack(fill="x", pady=(2, 0))
-        neural_viewport.grid_rowconfigure(0, weight=0)
-        neural_viewport.grid_columnconfigure(0, weight=1)
-
-        self._neural_overview_canvas = tk.Canvas(
-            neural_viewport,
-            bg=DARK_PANEL2,
-            highlightthickness=1,
-            highlightbackground=DARK_BORDER,
-            bd=0,
-            height=110,  # Initial value; auto-updated by _fit_neural_canvas
-        )
-        self._neural_overview_canvas.grid(row=0, column=0, sticky="ew")
-
-        self.neural_wrap = WrapFrame(self._neural_overview_canvas)
-        self._neural_overview_window = self._neural_overview_canvas.create_window(
-            (0, 0),
-            window=self.neural_wrap,
-            anchor="nw",
-        )
-
-        def _fit_neural_canvas(event=None) -> None:
-            """Resize the canvas height to exactly match the tile content — no scrollbar."""
-            try:
-                self.neural_wrap.update_idletasks()
-                h = self.neural_wrap.winfo_reqheight()
-                if h > 1:
-                    c = self._neural_overview_canvas
-                    c.configure(
-                        height=h,
-                        scrollregion=(0, 0, c.winfo_reqwidth(), h),
-                    )
-            except Exception:
-                pass
-
-        def _on_neural_canvas_configure(e) -> None:
-            # Keep the inner wrap frame exactly the canvas width so tiles wrap correctly.
-            try:
-                self._neural_overview_canvas.itemconfigure(
-                    self._neural_overview_window, width=int(e.width)
-                )
-            except Exception:
-                pass
-            _fit_neural_canvas()
-
-        self._neural_overview_canvas.bind(
-            "<Configure>", _on_neural_canvas_configure, add="+"
-        )
-        self.neural_wrap.bind("<Configure>", _fit_neural_canvas, add="+")
-        self._fit_neural_canvas_height = _fit_neural_canvas
-
-        # Initialize neural tiles dictionary and cache for this neural section
-        self.neural_tiles: Dict[str, NeuralSignalTile] = {}
-        self._neural_overview_cache: Dict[str, Tuple[float, Any]] = {}
-
-        # Build the neural tiles
-        self._rebuild_neural_overview()
-        try:
-            self.after_idle(self._fit_neural_canvas_height)
-        except Exception:
-            pass
-
-        # Trading section content
-        # Trader status with inline buttons
-        trader_row = ttk.Frame(trading_section)
-        trader_row.pack(fill="x", padx=6, pady=(6, 2))
-
-        self.lbl_trader = ttk.Label(
-            trader_row,
-            text="Not trading",
-            font=("TkDefaultFont", 8),
-            foreground=DARK_ACCENT2,
-        )
-        self.lbl_trader.pack(side="left", anchor="w")
-
-        # Trading control buttons (matching Training section style) - inline with trader status
-        # Stop Trading button
+        trader_row = ttk.Frame(acct_box)
+        trader_row.grid(row=0, column=0, columnspan=4, sticky="ew", padx=4, pady=(1, 2))
+        # buttons first: a narrow pane then clips the exchange text, not them
         self.btn_stop_trader = ttk.Button(
             trader_row,
             text="■",
@@ -3074,7 +2679,6 @@ class PowerTraderHub(tk.Tk):
         self.btn_stop_trader.pack(side="right", padx=(0, 2), pady=0, ipady=0)
         ToolTip(self.btn_stop_trader, "Stop trader")
 
-        # Start Trading button
         self.btn_start_trader = ttk.Button(
             trader_row,
             text="►",
@@ -3083,15 +2687,132 @@ class PowerTraderHub(tk.Tk):
         )
         self.btn_start_trader.pack(side="right", padx=(0, 0), pady=0, ipady=0)
         ToolTip(self.btn_start_trader, "Start trader")
-
-        # Exchange status indicator
-        self.lbl_exchange = ttk.Label(
-            trading_section,
-            text="Exchange: Checking...",
+        ttk.Label(
+            trader_row, text="Trader:", font=("TkDefaultFont", 8), foreground=DARK_MUTED
+        ).pack(side="left")
+        self.lbl_trader = ttk.Label(
+            trader_row,
+            text="stopped",
             font=("TkDefaultFont", 8),
             foreground=DARK_ACCENT2,
         )
-        self.lbl_exchange.pack(anchor="w", padx=6, pady=(0, 6))
+        self.lbl_trader.pack(side="left", padx=(3, 12))
+
+        # Exchange status (click for details)
+        self.lbl_exchange = ttk.Label(
+            trader_row,
+            text="Exchange: Checking...",
+            font=("TkDefaultFont", 8),
+            foreground=DARK_ACCENT2,
+            cursor="hand2",
+        )
+        self.lbl_exchange.pack(side="left")
+
+        def _figure(row: int, col: int, key: str, attr: str) -> None:
+            ttk.Label(
+                acct_box, text=key, font=("TkDefaultFont", 8), foreground=DARK_MUTED
+            ).grid(row=row, column=col, sticky="w", padx=(4, 6))
+            value = ttk.Label(acct_box, text="N/A", font=("TkDefaultFont", 8))
+            value.grid(row=row, column=col + 1, sticky="w", padx=(0, 8))
+            setattr(self, attr, value)
+
+        _figure(1, 0, "Value", "lbl_acct_total_value")
+        _figure(1, 2, "Buying Power", "lbl_acct_buying_power")
+        _figure(2, 0, "Holdings", "lbl_acct_holdings_value")
+        _figure(2, 2, "% in Trade", "lbl_acct_percent_in_trade")
+        _figure(3, 0, "DCA Single", "lbl_acct_dca_single")
+        _figure(3, 2, "DCA Spread", "lbl_acct_dca_spread")
+        _figure(4, 0, "Realized", "lbl_pnl")
+        ttk.Frame(acct_box, height=2).grid(row=5, column=0, columnspan=4)
+
+        # Coins: one cell per coin (training status, trained-for, long/short
+        # signal counts), with the Training and Thinking controls in its header.
+        training_section = ttk.LabelFrame(main_container, text="Coins")
+        training_section.grid(row=1, column=0, sticky="ew", pady=(3, 0))
+
+        training_title_row = ttk.Frame(training_section)
+        training_title_row.pack(fill="x", padx=6, pady=(1, 0))
+
+        # Training: counter and Train all / Stop all
+        ttk.Label(
+            training_title_row,
+            text="Training:",
+            font=("TkDefaultFont", 8),
+            foreground=DARK_MUTED,
+        ).pack(side="left")
+        total_coins = len(self.coins) if self.coins else 0
+        self.training_status_label = ttk.Label(
+            training_title_row,
+            text=f"0/{total_coins} running",
+            font=("TkDefaultFont", 8),
+            foreground=DARK_ACCENT2,
+        )
+        self.training_status_label.pack(side="left", padx=(3, 4))
+        # Note: TTK buttons don't support 'height' parameter, so we only use 'width'
+        train_all_btn = ttk.Button(
+            training_title_row,
+            text="►",
+            width=MINI_BTN_W,
+            command=self.train_all_coins,
+        )
+        train_all_btn.pack(side="left", pady=0, ipady=0)
+        ToolTip(train_all_btn, "Train all coins")
+        stop_all_btn = ttk.Button(
+            training_title_row,
+            text="■",
+            width=MINI_BTN_W,
+            command=self.stop_all_trainers,
+        )
+        stop_all_btn.pack(side="left", padx=(2, 0), pady=0, ipady=0)
+        ToolTip(stop_all_btn, "Stop all trainers")
+
+        # Thinking (the neural runner): status and Start / Stop
+        self.btn_stop_neural = ttk.Button(
+            training_title_row,
+            text="■",
+            width=MINI_BTN_W,
+            command=self.stop_neural,
+        )
+        self.btn_stop_neural.pack(side="right", padx=(2, 0), pady=0, ipady=0)
+        ToolTip(self.btn_stop_neural, "Stop neural runner")
+        self.btn_start_neural = ttk.Button(
+            training_title_row,
+            text="►",
+            width=MINI_BTN_W,
+            command=self.start_neural,
+        )
+        self.btn_start_neural.pack(side="right", pady=0, ipady=0)
+        ToolTip(self.btn_start_neural, "Start neural runner")
+        self.lbl_neural = ttk.Label(
+            training_title_row,
+            text="stopped",
+            font=("TkDefaultFont", 8),
+            foreground=DARK_ACCENT2,
+        )
+        self.lbl_neural.pack(side="right", padx=(3, 4))
+        ttk.Label(
+            training_title_row,
+            text="Thinking:",
+            font=("TkDefaultFont", 8),
+            foreground=DARK_MUTED,
+        ).pack(side="right")
+
+        # Keep train_coin_var for click handlers but remove dropdown UI
+        self.train_coin_var = tk.StringVar(value=(self.coins[0] if self.coins else ""))
+
+        # One cell per coin, built once per coin list and updated in place
+        self.training_status_frame = ttk.Frame(training_section)
+        self.training_status_frame.pack(fill="x", padx=4, pady=(1, 3))
+        self._training_cells: Dict[str, Tuple[Any, ...]] = {}
+        # signal counts' mtime cache: path -> (mtime, value)
+        self._neural_overview_cache: Dict[str, Tuple[float, Any]] = {}
+        self._build_training_table()
+        self.training_status_frame.bind(
+            "<Configure>", lambda e: self._layout_training_table(), add="+"
+        )
+
+        # Training automation: auto-retrain timers
+        self.auto_retrain_timers = {}  # coin -> timer for auto retraining
 
         # (Duplicate Account section removed - using the one in top_sections_row)
 
@@ -3213,6 +2934,7 @@ class PowerTraderHub(tk.Tk):
         self.trader_text.configure(yscrollcommand=trader_scroll.set)
         self.trader_text.pack(side="left", fill="both", expand=True)
         trader_scroll.pack(side="right", fill="y")
+
         # Add left panes to vertical PanedWindow (enables drag sash between Controls and Live Output)
         left_split.add(top_controls, weight=0)
         left_split.add(logs_frame, weight=1)
@@ -3222,24 +2944,32 @@ class PowerTraderHub(tk.Tk):
         except Exception:
             pass
 
-        def _init_left_split_sash_once():
-            try:
-                if getattr(self, "_did_init_left_split_sash", False):
-                    return
-                if getattr(self, "_user_moved_left_split", False):
-                    self._did_init_left_split_sash = True
-                    return
-                total = left_split.winfo_height()
-                if total <= 2:
-                    self.after(10, _init_left_split_sash_once)
-                    return
-                target = min(450, total - 80)
-                left_split.sashpos(0, int(target))
-                self._did_init_left_split_sash = True
-            except Exception:
-                pass
+        def _fit_left_split() -> None:
+            """Give the Controls pane the height its content asks for (within
+            limits) and the rest to Live Output; not after the user moved the sash."""
+            if getattr(self, "_user_moved_left_split", False):
+                return
+            if getattr(self, "_fit_left_split_pending", False):
+                return
+            self._fit_left_split_pending = True
 
-        self.after_idle(_init_left_split_sash_once)
+            def _apply() -> None:
+                self._fit_left_split_pending = False
+                try:
+                    total = left_split.winfo_height()
+                    if total <= 2:
+                        self.after(50, _fit_left_split)
+                        return
+                    target = _left_split_target(top_controls.winfo_reqheight(), total)
+                    if abs(left_split.sashpos(0) - target) > 2:
+                        left_split.sashpos(0, target)
+                except Exception:
+                    pass
+
+            self.after_idle(_apply)
+
+        self._fit_left_split = _fit_left_split
+        self.after_idle(_fit_left_split)
 
         # ----------------------------
         # RIGHT TOP: Charts (tabs)
@@ -5379,133 +5109,6 @@ Platform: {sys.platform}
                 out[c] = "❌"
         return out
 
-    def think_selected_coin(self) -> None:
-        """Start neural runner for the selected coin only (similar to train_selected_coin)."""
-        coin = (
-            (getattr(self, "think_coin_var", None) or self.train_coin_var)
-            .get()
-            .strip()
-            .upper()
-        )
-
-        if not coin:
-            try:
-                self.status.config(text="No coin selected for neural thinking")
-            except Exception:
-                pass
-            return
-
-        print(f"DEBUG: Starting neural thinking for individual coin: {coin}")
-
-        # Create individual neural process for this coin (similar to trainer approach)
-        if not hasattr(self, "individual_neural_processes"):
-            self.individual_neural_processes = {}
-
-        # Check if already running for this coin
-        if coin in self.individual_neural_processes:
-            proc_info = self.individual_neural_processes[coin]
-            if (
-                proc_info
-                and hasattr(proc_info, "proc")
-                and proc_info.proc
-                and proc_info.proc.poll() is None
-            ):
-                print(f"DEBUG: Neural thinking already running for {coin}")
-                try:
-                    self.status.config(
-                        text=f"Neural thinking already active for {coin}"
-                    )
-                except Exception:
-                    pass
-                return
-
-        # Start individual neural process for this coin
-        script_path = os.path.join(
-            self.project_dir, self.settings["script_neural_runner2"]
-        )
-
-        try:
-            # Create ProcessInfo for individual coin neural runner
-            from collections import namedtuple
-
-            ProcessInfo = namedtuple("ProcessInfo", ["name", "script_path", "cwd"])
-
-            proc_info = ProcessInfo(
-                name=f"Neural Runner ({coin})",
-                script_path=script_path,
-                cwd=pt_paths.data_dir(),
-            )
-
-            # Start the process with the coin argument
-            import subprocess
-
-            env = os.environ.copy()
-            env["POWERTRADER_HUB_DIR"] = self.hub_dir
-            proc = subprocess.Popen(
-                [sys.executable, script_path, coin],
-                cwd=proc_info.cwd,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
-            )
-
-            # Store process info
-            proc_info_with_proc = type(
-                "ProcessInfo",
-                (),
-                {
-                    "name": proc_info.name,
-                    "script_path": proc_info.script_path,
-                    "cwd": proc_info.cwd,
-                    "proc": proc,
-                },
-            )()
-
-            self.individual_neural_processes[coin] = proc_info_with_proc
-
-            print(f"DEBUG: Started neural thinking for {coin} (PID: {proc.pid})")
-            try:
-                self.status.config(text=f"Neural thinking started for {coin}")
-            except Exception:
-                pass
-
-        except Exception as e:
-            print(f"ERROR: Failed to start neural thinking for {coin}: {e}")
-            try:
-                self.status.config(text=f"Failed to start neural thinking for {coin}")
-            except Exception:
-                pass
-
-    def stop_selected_neural(self) -> None:
-        """Stop neural runner for the selected coin."""
-        coin = (
-            (getattr(self, "think_coin_var", None) or self.train_coin_var)
-            .get()
-            .strip()
-            .upper()
-        )
-
-        if not coin or not hasattr(self, "individual_neural_processes"):
-            return
-
-        if coin in self.individual_neural_processes:
-            proc_info = self.individual_neural_processes[coin]
-            if proc_info and hasattr(proc_info, "proc") and proc_info.proc:
-                try:
-                    proc_info.proc.terminate()
-                    print(f"DEBUG: Stopped neural thinking for {coin}")
-                    try:
-                        self.status.config(text=f"Stopped neural thinking for {coin}")
-                    except Exception:
-                        pass
-                except Exception as e:
-                    print(f"ERROR: Failed to stop neural thinking for {coin}: {e}")
-                finally:
-                    del self.individual_neural_processes[coin]
-
     def train_selected_coin(self) -> None:
         print(f"DEBUG: train_selected_coin() called")
         coin = (
@@ -5947,151 +5550,126 @@ Platform: {sys.platform}
 
         print(f"DEBUG: Scheduled auto-retrain for {coin} in {interval_hours} hours")
 
-    def _create_crypto_icon_grid(
-        self, sig: List[Tuple[str, str]], status_map: Dict[str, str]
-    ) -> None:
-        """Create a grid layout of cryptocurrency icons with status-based borders"""
+    def _build_training_table(self) -> None:
+        """One cell per coin: status dot, symbol and trained-for. Clicking a cell
+        trains the coin, or stops it while it trains (both ask first)."""
+        frame = self.training_status_frame
+        for widget in frame.winfo_children():
+            widget.destroy()
         try:
-            # Create main container frame for the grid
-            grid_frame = tk.Frame(self.training_status_frame, bg=DARK_BG)
-            grid_frame.pack(fill="x", expand=False, padx=0, pady=0)
-
-            # Calculate grid dimensions for horizontal wrapping
-            try:
-                frame_width = self.training_status_frame.winfo_width()
-                if frame_width <= 1:
-                    frame_width = 300  # Smaller default for tighter layout
-                # Smaller coin size: 60px coin + 20px margin = 80px per coin
-                max_cols = max(1, (frame_width - 20) // 80)
-                # Ensure we get 3 coins in normal view, 4-5 in fullscreen
-                if max_cols < 3:
-                    max_cols = 3
-            except Exception:
-                max_cols = 3  # Default to 3 for better wrapping
-
-            row = 0
-            col = 0
-
-            for i, (coin, status) in enumerate(sig):
-                # Create compact frame for each coin (icon + hours)
-                coin_frame = tk.Frame(
-                    grid_frame,
-                    bg=DARK_BG,
-                    relief="solid",
-                    bd=2,
-                    highlightthickness=0,
-                    width=60,
-                    height=55,
-                )
-                coin_frame.grid(row=row, column=col, padx=5, pady=4, sticky="nsew")
-                coin_frame.pack_propagate(False)
-
-                # Get status-based border color with recency check
-                border_color = self._get_status_border_color(status, coin)
-                coin_frame.configure(
-                    highlightbackground=border_color, highlightcolor=border_color
-                )
-
-                # Create compact icon container
-                icon_frame = tk.Frame(coin_frame, bg=DARK_BG, width=50, height=35)
-                icon_frame.pack(padx=0, pady=(2, 0))
-                icon_frame.pack_propagate(False)
-
-                # Create compact coin symbol label
-                icon_label = tk.Label(
-                    icon_frame,
-                    text=coin,
-                    bg=DARK_BG,
-                    fg=border_color,  # Use status color for text
-                    font=("Arial", 9, "bold"),
-                    width=6,
-                    height=2,
-                    relief="flat",
-                    borderwidth=1,
-                    highlightthickness=1,
-                    highlightbackground=border_color,
-                    highlightcolor=border_color,
-                )
-                icon_label.pack(expand=True, fill="both")
-                icon_label.configure(cursor="hand2")
-
-                # Get training hours
-                hours_text = self._get_training_hours(coin)
-
-                # Create compact hours label below icon
-                hours_label = tk.Label(
-                    coin_frame,
-                    text=hours_text,
-                    bg=DARK_BG,
-                    fg=DARK_FG,
-                    font=("Arial", 7, "normal"),
-                    width=8,
-                    height=1,
-                )
-                hours_label.pack(pady=(0, 2))
-
-                # Make coin clickable for training
-                click_handler = self._make_coin_click_handler(coin)
-                for widget in [coin_frame, icon_frame, icon_label, hours_label]:
-                    widget.bind("<Button-1>", click_handler)
-                    widget.configure(cursor="hand2")
-
-                # Add hover effects
-                def make_hover_handlers(frame, color):
-                    def on_enter(event):
-                        try:
-                            # Create lighter version of color for hover
-                            if color.startswith("#") and len(color) == 7:
-                                r, g, b = (
-                                    int(color[1:3], 16),
-                                    int(color[3:5], 16),
-                                    int(color[5:7], 16),
-                                )
-                                # Lighten the color
-                                r = min(255, r + 30)
-                                g = min(255, g + 30)
-                                b = min(255, b + 30)
-                                hover_color = f"#{r:02x}{g:02x}{b:02x}"
-                                frame.configure(relief="raised", bd=3)
-                            else:
-                                frame.configure(relief="raised", bd=3)
-                        except Exception:
-                            frame.configure(relief="raised", bd=3)
-
-                    def on_leave(event):
-                        frame.configure(relief="solid", bd=2)
-
-                    return on_enter, on_leave
-
-                on_enter, on_leave = make_hover_handlers(coin_frame, border_color)
-                for widget in [coin_frame, icon_frame, icon_label, hours_label]:
-                    widget.bind("<Enter>", on_enter)
-                    widget.bind("<Leave>", on_leave)
-
-                # Store reference
-                self.coin_status_labels[coin] = coin_frame
-
-                # Update grid position
-                col += 1
-                if col >= max_cols:
-                    col = 0
-                    row += 1
-
-            # Configure grid weights for responsive layout
-            for i in range(max_cols):
-                grid_frame.grid_columnconfigure(i, weight=1)
-
-        except Exception as e:
-            print(f"Error creating crypto icon grid: {e}")
-            # Fallback to simple text display
-            fallback_label = tk.Label(
-                self.training_status_frame,
-                text=" | ".join([f"{coin}:{status}" for coin, status in sig]),
-                bg=DARK_BG,
-                fg=DARK_FG,
-                font=("Consolas", 8),
+            bg = ttk.Style().lookup("TFrame", "background") or DARK_BG
+        except Exception:
+            bg = DARK_BG
+        self._training_cells = {}
+        self._training_cell_state: Dict[str, Tuple[str, str, str]] = {}
+        for coin in self.coins or []:
+            cell = tk.Frame(frame, bg=bg, cursor="hand2")
+            tight = {"bg": bg, "bd": 0, "padx": 0, "pady": 0}
+            dot = tk.Label(
+                cell, text="●", fg=STATUS_IDLE, font=("TkDefaultFont", 9), **tight
             )
-            fallback_label.pack()
+            sym = tk.Label(
+                cell,
+                text=coin,
+                fg=DARK_FG,
+                font=("TkDefaultFont", 8, "bold"),
+                width=5,
+                anchor="w",
+                **tight,
+            )
+            age = tk.Label(
+                cell,
+                text="",
+                fg=DARK_MUTED,
+                font=("TkDefaultFont", 7),
+                width=7,
+                anchor="w",
+                **tight,
+            )
+            sig = tk.Label(
+                cell,
+                text="–",
+                fg=DARK_MUTED,
+                font=("TkDefaultFont", 7, "bold"),
+                width=6,
+                anchor="w",
+                **tight,
+            )
+            dot.pack(side="left")
+            sym.pack(side="left", padx=(3, 2))
+            age.pack(side="left")
+            sig.pack(side="left")
+            handler = self._make_coin_click_handler(coin)
+
+            def _open_chart(_e=None, c=coin):
+                fn = getattr(self, "_show_chart_page", None)
+                if callable(fn):
+                    fn(c)
+
+            for widget in (cell, dot, sym, age, sig):
+                widget.bind("<Button-1>", handler)
+                widget.bind("<Button-3>", _open_chart)
+            ToolTip(dot, lambda c=coin: self._coin_tooltip(c, "status"))
+            ToolTip(sym, lambda c=coin: self._coin_tooltip(c, "coin"))
+            ToolTip(age, lambda c=coin: self._coin_tooltip(c, "age"))
+            ToolTip(sig, lambda c=coin: self._coin_tooltip(c, "signal"))
+            self._training_cells[coin] = (cell, dot, sym, age, sig)
+        self._training_signal_state: Dict[str, Tuple[str, str]] = {}
+        self._training_status: Dict[str, str] = {}
+        self._training_signal_info: Dict[str, Tuple[Any, ...]] = {}
+        self._training_table_coins = tuple(self.coins or [])
+        self._training_table_cols = 0
+        self._layout_training_table()
+
+    def _layout_training_table(self) -> None:
+        """Arrange the cells in as many columns as fit, filled top to bottom."""
+        cells = getattr(self, "_training_cells", None) or {}
+        if not cells:
+            return
+        width = self.training_status_frame.winfo_width()
+        if width <= 1:
+            width = 300
+        try:
+            cell_w = max(c[0].winfo_reqwidth() for c in cells.values()) + 10
+        except Exception:
+            cell_w = 0
+        if cell_w <= 11:  # not measured yet
+            cell_w = 150
+        cols = max(1, min(len(cells), width // cell_w))
+        if cols != getattr(self, "_training_table_cols", 0):
+            self._training_table_cols = cols
+            rows = -(-len(cells) // cols)
+            for i, coin in enumerate(self._training_table_coins):
+                cells[coin][0].grid(
+                    row=i % rows, column=i // rows, sticky="w", padx=(0, 8), pady=1
+                )
+        # the table's final height is known once its width is: fit the split again
+        fit = getattr(self, "_fit_left_split", None)
+        if fit:
+            fit()
+
+    def _update_training_table(self, status_map: Dict[str, str]) -> None:
+        """Refresh each cell's dot colour and trained-for text; only changed
+        widgets are touched."""
+        if tuple(self.coins or []) != getattr(self, "_training_table_coins", None):
+            self._build_training_table()
+        statuses = getattr(self, "_training_status", None)
+        if statuses is None:
+            statuses = self._training_status = {}
+        for coin, (cell, dot, sym, age, sig) in self._training_cells.items():
+            status = status_map.get(coin, "❌")
+            training = status in ("●", "○")
+            state = (
+                status if training else "●",
+                self._get_status_border_color(status, coin),
+                "training" if training else self._get_training_hours(coin),
+            )
+            statuses[coin] = status  # for the cell's tooltips
+            if self._training_cell_state.get(coin) == state:
+                continue
+            self._training_cell_state[coin] = state
+            dot.configure(text=state[0], fg=state[1])
+            age.configure(text=state[2])
 
     def _fetch_binance_icon(self, coin_symbol: str) -> Optional[str]:
         """Fetch SVG icon from Binance CDN"""
@@ -6105,19 +5683,12 @@ Platform: {sys.platform}
         return None
 
     def _get_status_border_color(self, status: str, coin: str = None) -> str:
-        """Get border color based on training status and recency"""
+        """Status colour of a coin: trained green, training amber, untrained grey."""
         if status in ("✅", "✓"):  # _training_status_map marks trained coins ✅
-            # Check if training was recent (within last 2 hours = fresh green)
-            if coin and self._is_recently_trained(coin, hours_threshold=2):
-                return "#4CAF50"  # Bright green for recently completed
-            else:
-                return "#66BB6A"  # Slightly dimmer green for older completed
-        elif status in ["●", "○"]:
-            return "#2196F3"  # Blue for running
-        elif status == "❌":
-            return "#F44336"  # Red for failed/not trained
-        else:
-            return "#757575"  # Gray for unknown
+            return STATUS_GREEN
+        if status in ("●", "○"):
+            return STATUS_AMBER
+        return STATUS_IDLE
 
     def _is_recently_trained(self, coin: str, hours_threshold: float = 2.0) -> bool:
         """Check if coin was trained within the threshold hours"""
@@ -6469,18 +6040,8 @@ Platform: {sys.platform}
             except Exception:
                 pass
 
-            # show each coin status with SVG grid layout (ONLY redraw if it actually changed)
-            sig = tuple((c, status_map.get(c, "N/A")) for c in self.coins)
-            if getattr(self, "_last_training_sig", None) != sig:
-                self._last_training_sig = sig
-
-                # Clear existing widgets
-                for widget in self.training_status_frame.winfo_children():
-                    widget.destroy()
-                self.coin_status_labels.clear()
-
-                # Create grid layout for coin icons
-                self._create_crypto_icon_grid(sig, status_map)
+            # each coin's status dot and trained-for text (updated in place)
+            self._update_training_table(status_map)
         except Exception as e:
             print(f"Error updating training status: {e}")
             pass
@@ -6618,7 +6179,9 @@ Platform: {sys.platform}
         if mtime != getattr(self, "_signals_note_mtime", object()):
             self._signals_note_mtime = mtime
             try:
-                self._signals_note_text = read_strategy_settings().note
+                strategy = read_strategy_settings()
+                self._signals_note_text = strategy.note
+                self._signals_engine = str(strategy.engine or "")
             except Exception:
                 self._signals_note_text = "SIGNALS: BLOCKED"
         indicator.update_signals_note(self._signals_note_text)
@@ -6738,14 +6301,14 @@ Platform: {sys.platform}
         if not data:
             # account summary (right-side status area)
             try:
-                self.lbl_acct_total_value.config(text="Total Account Value: N/A")
-                self.lbl_acct_holdings_value.config(text="Holdings Value: N/A")
-                self.lbl_acct_buying_power.config(text="Buying Power: N/A")
-                self.lbl_acct_percent_in_trade.config(text="Percent In Trade: N/A")
+                self.lbl_acct_total_value.config(text="N/A")
+                self.lbl_acct_holdings_value.config(text="N/A")
+                self.lbl_acct_buying_power.config(text="N/A")
+                self.lbl_acct_percent_in_trade.config(text="N/A")
 
                 # DCA affordability
-                self.lbl_acct_dca_spread.config(text="DCA Levels (spread): N/A")
-                self.lbl_acct_dca_single.config(text="DCA Levels (single): N/A")
+                self.lbl_acct_dca_spread.config(text="N/A")
+                self.lbl_acct_dca_single.config(text="N/A")
             except Exception:
                 pass
 
@@ -6766,14 +6329,14 @@ Platform: {sys.platform}
 
             from_book = data.get("source") == "paper_book"
             self.lbl_acct_total_value.config(
-                text=f"Total Account Value: {_fmt_money(acct.get('total_account_value', None))}"
+                text=_fmt_money(acct.get("total_account_value", None))
                 + (" (saved paper account)" if from_book else "")
             )
             self.lbl_acct_holdings_value.config(
-                text=f"Holdings Value: {_fmt_money(acct.get('holdings_sell_value', None))}"
+                text=_fmt_money(acct.get("holdings_sell_value", None))
             )
             self.lbl_acct_buying_power.config(
-                text=f"Buying Power: {_fmt_money(acct.get('buying_power', None))}"
+                text=_fmt_money(acct.get("buying_power", None))
             )
 
             pit = acct.get("percent_in_trade", None)
@@ -6781,7 +6344,7 @@ Platform: {sys.platform}
                 pit_txt = f"{float(pit):.2f}%"
             except Exception:
                 pit_txt = "N/A"
-            self.lbl_acct_percent_in_trade.config(text=f"Percent In Trade: {pit_txt}")
+            self.lbl_acct_percent_in_trade.config(text=pit_txt)
 
             # -------------------------
             # DCA affordability
@@ -6829,12 +6392,8 @@ Platform: {sys.platform}
                     single_levels += 1
 
             # Show labels + number (one line each)
-            self.lbl_acct_dca_spread.config(
-                text=f"DCA Levels (spread): {spread_levels}"
-            )
-            self.lbl_acct_dca_single.config(
-                text=f"DCA Levels (single): {single_levels}"
-            )
+            self.lbl_acct_dca_spread.config(text=str(spread_levels))
+            self.lbl_acct_dca_single.config(text=str(single_levels))
 
         except Exception:
             pass
@@ -7033,10 +6592,10 @@ Platform: {sys.platform}
 
         data = _safe_read_json(self.pnl_ledger_path)
         if not data:
-            self.lbl_pnl.config(text="Total realized: N/A")
+            self.lbl_pnl.config(text="N/A")
             return
         total = float(data.get("total_realized_profit_usd", 0.0))
-        self.lbl_pnl.config(text=f"Total realized: {_fmt_money(total)}")
+        self.lbl_pnl.config(text=_fmt_money(total))
 
     def _refresh_trade_history(self) -> None:
         # mtime cache: avoid reading/parsing/rebuilding the list every tick
@@ -7171,10 +6730,10 @@ Platform: {sys.platform}
         except Exception:
             pass
 
-        # Rebuild neural overview tiles (if the widget exists)
+        # Rebuild the coin table and its signal counts for the new coin list
         try:
-            if hasattr(self, "neural_wrap") and self.neural_wrap.winfo_exists():
-                self._rebuild_neural_overview()
+            if getattr(self, "_training_cells", None) is not None:
+                self._build_training_table()
                 self._refresh_neural_overview()
         except Exception:
             pass
@@ -7189,131 +6748,12 @@ Platform: {sys.platform}
         except Exception:
             pass
 
-    def _rebuild_neural_overview(self) -> None:
-        """
-        Recreate the coin tiles in the left-side Neural Signals box to match self.coins.
-        Uses WrapFrame so it automatically breaks into multiple rows.
-        Adds hover highlighting and click-to-open chart.
-        """
-        if not hasattr(self, "neural_wrap") or self.neural_wrap is None:
-            return
-
-        # Clear old tiles
-        try:
-            if hasattr(self.neural_wrap, "clear"):
-                self.neural_wrap.clear(destroy_widgets=True)
-            else:
-                for ch in list(self.neural_wrap.winfo_children()):
-                    ch.destroy()
-        except Exception:
-            pass
-
-        self.neural_tiles = {}
-
-        for coin in self.coins or []:
-            tile = NeuralSignalTile(
-                self.neural_wrap,
-                coin,
-                trade_start_level=int(self.settings.get("trade_start_level", 3) or 3),
-            )
-
-            # --- Hover highlighting (real, visible) ---
-            def _on_enter(_e=None, t=tile):
-                try:
-                    t.set_hover(True)
-                except Exception:
-                    pass
-
-            def _on_leave(_e=None, t=tile):
-                # Avoid flicker: when moving between child widgets, ignore "leave" if pointer is still inside tile.
-                try:
-                    x = t.winfo_pointerx()
-                    y = t.winfo_pointery()
-                    w = t.winfo_containing(x, y)
-                    while w is not None:
-                        if w == t:
-                            return
-                        w = getattr(w, "master", None)
-                except Exception:
-                    pass
-
-                try:
-                    t.set_hover(False)
-                except Exception:
-                    pass
-
-            tile.bind("<Enter>", _on_enter, add="+")
-            tile.bind("<Leave>", _on_leave, add="+")
-            try:
-                for w in tile.winfo_children():
-                    w.bind("<Enter>", _on_enter, add="+")
-                    w.bind("<Leave>", _on_leave, add="+")
-            except Exception:
-                pass
-
-            # --- Click: start neural thinking for this coin ---
-            def _start_coin_thinking(_e=None, c=coin):
-                try:
-                    print(f"DEBUG: Neural tile clicked: {c}")
-                    # Set the coin for individual thinking
-                    if not hasattr(self, "think_coin_var"):
-                        self.think_coin_var = tk.StringVar(value=c)
-                    else:
-                        self.think_coin_var.set(c)
-                    print(f"DEBUG: think_coin_var set to: {self.think_coin_var.get()}")
-                    # Start neural thinking for this coin
-                    self.think_selected_coin()
-                except Exception as e:
-                    print(f"Error starting neural thinking for {c}: {e}")
-
-            # Bind both left click and double click for neural thinking
-            tile.bind("<Button-1>", _start_coin_thinking, add="+")
-            tile.bind("<Double-Button-1>", _start_coin_thinking, add="+")
-            try:
-                for w in tile.winfo_children():
-                    w.bind("<Button-1>", _start_coin_thinking, add="+")
-                    w.bind("<Double-Button-1>", _start_coin_thinking, add="+")
-            except Exception:
-                pass
-
-            # Add right-click for chart (secondary action)
-            def _open_coin_chart(_e=None, c=coin):
-                try:
-                    fn = getattr(self, "_show_chart_page", None)
-                    if callable(fn):
-                        fn(str(c).strip().upper())
-                except Exception:
-                    pass
-
-            tile.bind("<Button-3>", _open_coin_chart, add="+")  # Right-click for chart
-            try:
-                for w in tile.winfo_children():
-                    w.bind("<Button-3>", _open_coin_chart, add="+")
-            except Exception:
-                pass
-
-            self.neural_wrap.add(tile, padx=(0, 6), pady=(0, 6))
-            self.neural_tiles[coin] = tile
-
-        # Layout and scrollbar refresh
-        try:
-            self.neural_wrap._schedule_reflow()
-        except Exception:
-            pass
-
-        try:
-            fn = getattr(self, "_fit_neural_canvas_height", None)
-            if callable(fn):
-                self.after_idle(fn)
-        except Exception:
-            pass
-
     def _refresh_neural_overview(self) -> None:
         """
-        Update each coin tile with long/short neural signals.
+        Show each coin's long/short signal counts in its coin-table cell.
         Uses mtime caching so it's cheap to call every UI tick.
         """
-        if not hasattr(self, "neural_tiles"):
+        if not getattr(self, "_training_cells", None):
             return
 
         # Keep coin_folders aligned with current settings/coins
@@ -7355,9 +6795,14 @@ Platform: {sys.platform}
             except Exception:
                 return 0
 
-        latest_ts = None
+        try:  # the trader's start gate: long >= this level and no short
+            level = max(
+                1, min(int(float(self.settings.get("trade_start_level", 3) or 3)), 7)
+            )
+        except Exception:
+            level = 3
 
-        for coin, tile in list(self.neural_tiles.items()):
+        for coin, cell in list(self._training_cells.items()):
             folder = ""
             try:
                 folder = (self.coin_folders or {}).get(coin, "")
@@ -7365,7 +6810,7 @@ Platform: {sys.platform}
                 folder = ""
 
             if not folder or not os.path.isdir(folder):
-                tile.set_values(0, 0)
+                self._show_signal_counts(coin, cell[4], None, None, None, level)
                 continue
 
             long_sig = 0
@@ -7392,24 +6837,152 @@ Platform: {sys.platform}
                     if mt:
                         mt_candidates.append(float(mt))
 
-            tile.set_values(long_sig, short_sig)
+            self._show_signal_counts(
+                coin,
+                cell[4],
+                long_sig if mt_candidates else None,
+                short_sig,
+                min(mt_candidates) if mt_candidates else None,
+                level,
+            )
 
-            if mt_candidates:
-                mx = max(mt_candidates)
-                latest_ts = mx if (latest_ts is None or mx > latest_ts) else latest_ts
+    def _coin_tooltip(self, coin: str, field: str) -> str:
+        """What a coin cell's field means, with this coin's current values."""
+        status = (getattr(self, "_training_status", None) or {}).get(coin, "❌")
+        training = status in ("●", "○")
+        trained = status in ("✅", "✓")
+        if field == "coin":
+            return (
+                f"{coin}\n"
+                "Click: train it (or stop its training); both ask first.\n"
+                "Right-click: open its price chart."
+            )
+        if field == "status":
+            if training:
+                return (
+                    f"{coin}: training now (amber dot).\n"
+                    f"The neural runner skips {coin} until the new model is saved.\n"
+                    "Click to stop the training run."
+                )
+            if trained:
+                return (
+                    f"{coin}: trained (green dot).\n"
+                    "Its model is less than 14 days old, so the neural runner uses it.\n"
+                    "Click to retrain (this replaces the model)."
+                )
+            return (
+                f"{coin}: not trained (grey dot).\n"
+                "No model yet, or its model is older than 14 days, so the neural "
+                f"runner gives {coin} no signals.\n"
+                "Click to train it (about 2 minutes)."
+            )
+        if field == "age":
+            if training:
+                return (
+                    f"Trained-for: {coin} is training now; this resets when its new "
+                    "model is saved."
+                )
+            ts = (getattr(self, "last_training_times", None) or {}).get(coin)
+            if not trained or not ts:
+                return (
+                    f"Trained-for: {coin} has never been trained, or its model was "
+                    "removed or is older than 14 days."
+                )
+            hours = max(0.0, (time.time() - float(ts)) / 3600.0)
+            when = time.strftime("%d %b %H:%M", time.localtime(float(ts)))
+            auto = ""
+            try:
+                if self.settings.get("training_auto_enabled", True):
+                    every = float(self.settings.get("training_auto_interval_hours", 6))
+                    if every > 0:
+                        auto = (
+                            f"\nAuto-retrain: about every {every:g} h after a "
+                            "successful run (Settings)."
+                        )
+            except Exception:
+                pass
+            return (
+                f"Trained-for: time since {coin}'s model was last saved.\n"
+                f"{hours:.1f} h ago, at {when}. A model counts as trained for 14 days."
+                + auto
+            )
+        if field == "signal":
+            longs, shorts, mtime, level = (
+                getattr(self, "_training_signal_info", None) or {}
+            ).get(coin, (None, None, None, 3))
+            engine = str(getattr(self, "_signals_engine", "") or "")
+            if engine == "legacy_neural":
+                used = (
+                    "Your trader's engine is legacy_neural, so these counts decide "
+                    "its new trades and neural DCA."
+                )
+            else:
+                used = (
+                    f"Your trader's engine is {engine or 'catalogue'}, which does not "
+                    "use these counts; they are shown for information."
+                )
+            if longs is None:
+                return (
+                    f"Neural runner signal for {coin}: none yet.\n"
+                    "The runner has not written one: it is stopped, the coin is "
+                    "untrained or skipped, or it is still warming up (the first counts "
+                    "appear after two full sweeps).\n" + used
+                )
+            age_txt = ""
+            if mtime is not None:
+                secs = max(0, int(time.time() - float(mtime)))
+                age_txt = (
+                    f"\nUpdated {secs} s ago."
+                    if secs < 120
+                    else f"\nUpdated {secs // 60} min ago."
+                )
+                if secs > 15 * 60:
+                    age_txt += " Older than 15 minutes: the trader ignores it (dimmed)."
+            return (
+                f"Neural runner signal for {coin}: L{int(longs)} S{int(shorts or 0)}.\n"
+                f"L = how many of the 7 timeframes (1h, 2h, 4h, 8h, 12h, 1d, 1w) have "
+                f"the price below their predicted low (long); S = how many have it "
+                f"above their predicted high (short).\n"
+                f"Green: long is at least the trade start level ({level}, Settings) "
+                f"and there is no short, so a new trade could start. Orange: a short "
+                f"is present (no new trade). White: below the start level."
+                + age_txt
+                + "\n"
+                + used
+            )
+        return ""
 
-        # Update "Last:" label
+    def _show_signal_counts(
+        self, coin, label, longs, shorts, mtime, level: int = 3
+    ) -> None:
+        """One cell's "L<n> S<n>": green when the trader would start a trade
+        (long >= the trade start level and no short), orange while short, dimmed
+        when the runner has not rewritten it for 15 minutes; "–" when there is no
+        signal file. Only touches the label when the text or colour changes."""
+        info = getattr(self, "_training_signal_info", None)
+        if info is not None:
+            info[coin] = (longs, shorts, mtime, level)
+        if longs is None:
+            state = ("–", DARK_MUTED)
+        else:
+            text = f"L{int(longs)} S{int(shorts or 0)}"
+            if mtime is not None and time.time() - float(mtime) > 15 * 60:
+                colour = DARK_MUTED
+            elif shorts:
+                colour = LOG_SHORT
+            elif longs >= level:
+                colour = STATUS_GREEN
+            else:
+                colour = DARK_FG
+            state = (text, colour)
+        cache = getattr(self, "_training_signal_state", None)
+        if cache is None:
+            cache = self._training_signal_state = {}
+        if cache.get(coin) == state:
+            return
+        cache[coin] = state
         try:
-            if (
-                hasattr(self, "lbl_neural_overview_last")
-                and self.lbl_neural_overview_last.winfo_exists()
-            ):
-                if latest_ts:
-                    self.lbl_neural_overview_last.config(
-                        text=f"Last: {time.strftime('%H:%M:%S', time.localtime(float(latest_ts)))}"
-                    )
-                else:
-                    self.lbl_neural_overview_last.config(text="Last: N/A")
+            label.configure(text=state[0], fg=state[1])
         except Exception:
             pass
 

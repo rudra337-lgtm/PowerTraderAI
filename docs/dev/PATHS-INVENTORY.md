@@ -168,7 +168,7 @@ Exchange constructors (pt_exchanges.py): every connector takes `api_key, api_sec
 `kwargs["passphrase"]`; Aave, Yearn Finance and Lido Finance take `wallet_address, private_key`.
 
 Other environment variables: `POWERTRADER_HUB_DIR` (set by the hub for the trader, thinker and trainer —
-pt_hub.py:3817, 5666; *not* for the per-coin thinker at 5361-5388), `POWERTRADER_GUI_SETTINGS`,
+pt_hub.py:3817, 5666; *not* for the per-coin thinker at 5361-5388, since removed with the Thinking tiles), `POWERTRADER_GUI_SETTINGS`,
 `POWERTRADER_ENV`, `POWERTRADER_USER_REGION`, `POWERTRADER_LOG_LEVEL` (CI conftest).
 
 ## 9. Findings that FDS-108a must fix (not fixed in this phase)
