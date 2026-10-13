@@ -111,8 +111,8 @@ if keyring is not None:
 @pytest.fixture(autouse=True)
 def isolated_user_dirs(tmp_path, monkeypatch):
     """Fresh POWERTRADER_HOME, empty legacy folder and empty keyring per test, and no
-    request to Binance's exchange information: the shared market-status check answers
-    "unknown" (a test that needs a verdict passes its own)."""
+    request to Binance: the shared market-status check answers "unknown", and the chart's
+    candlestick-pattern fetch raises (a test that needs either passes its own)."""
     home = tmp_path / "pt_home"
     legacy = tmp_path / "pt_legacy"
     legacy.mkdir()
@@ -135,6 +135,16 @@ def isolated_user_dirs(tmp_path, monkeypatch):
             ),
         )
         monkeypatch.setattr(listing, "_shared", None)
+    try:
+        import pt_chart_patterns
+    except ImportError:  # loaded from outside app/, or no tkinter
+        pt_chart_patterns = None
+    if pt_chart_patterns is not None:
+
+        def _no_binance_fetch(*args, **kwargs):
+            raise RuntimeError("tests: no network (chart candlestick patterns)")
+
+        monkeypatch.setattr(pt_chart_patterns, "binance_closed_bars", _no_binance_fetch)
     memory = None
     if keyring is not None:
         previous = keyring.get_keyring()

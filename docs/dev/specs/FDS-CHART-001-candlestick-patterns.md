@@ -5,7 +5,7 @@
 **Branch:** this spec is on `docs/fds-chart-001-candlestick-patterns`, cut from `main` at `8f8c1d0`. Phase 1 is built on `feat/chart-patterns-1`, cut from `main` after this spec is merged.
 **Recommended model:** Claude Opus 5.5, effort high, for the detection module and its tests. Sonnet 5.5, effort high, for the chart and settings wiring.
 **Run log:** `docs/dev/RUN-LOG-chart-patterns-1.md`.
-**Status:** draft for owner review. This version is the owner's UI-CHANGE draft revised after a review on 2026-10-12, with the owner's decisions of 2026-10-12 and 2026-10-13 (§12). Nothing is implemented yet, and this document changes no code, trainer or strategy.
+**Status:** draft for owner review. This version is the owner's UI-CHANGE draft revised after a review on 2026-10-12, with the owner's decisions of 2026-10-12 and 2026-10-13 (§12). Phase 1 is implemented on `feat/chart-patterns-1` (§6.8 records the exact rules as built). It changes no trainer, strategy or trading code.
 **Related:** FDS-SIG-001 (`docs/dev/specs/FDS-SIG-001-signal-candidate-audit.md`) and FDS-SIG-002 (`docs/dev/specs/FDS-SIG-002-round-one-candidates.md`). This spec registers nothing with them (§10).
 
 ---
@@ -142,6 +142,8 @@ the bars its averages need (13 for the trend rule, 10 for R(10) and B(10)).
   3. then the order in the §6 tables.
 
   The rest are shown as a "+n" badge, expanded on hover.
+- **Staggering:** labels on the same side within 10 candles of each other are raised one level each (up to four
+  levels, 16 pt apart), so they do not sit on top of each other.
 - **Cap:** at most 12 labels per chart by default ("Max labels per chart", §8.3), in this priority:
   1. the pinned Three White Soldiers and Three Black Crows (§6.3);
   2. then by bar count;
@@ -298,6 +300,27 @@ These have their own group in Settings, and they are shown only when no classica
 | Ladder bottom, Concealing baby swallow | Their signal candles depend on gaps (same rule as above). Both are very rare. |
 | Tower bottom | Not in Bulkowski or TA-Lib, and undefined in the draft. Can be added later with a definition. |
 
+### 6.8 Rules as built
+
+`app/candlestick_patterns.py` is the exact codification of every rule. Each rule is pinned by a matching fixture and
+a near-miss fixture in `app/tests/test_candlestick_patterns.py`. Where the built rule goes beyond the TA-Lib reference
+or this spec, it is listed here:
+
+| Rule | As built | Why |
+|---|---|---|
+| Long-legged doji | A doji with **both** shadows ≥ 0.5 × R(10) | TA-Lib's "either shadow longer than the body" makes almost every doji long-legged. |
+| Hammer, hanging man, inverted hammer, shooting star | Short body; the long shadow > 2 × body; the opposite shadow very short. The §5.3 trend decides the name. | Twice the body is Nison's rule; TA-Lib uses "longer than the body". TA-Lib's prior-candle position tests and the textbook gaps are not used. |
+| Spinning tops, high wave | Exclude bars that are dojis | The doji is the more specific name. |
+| Bullish / bearish engulfing | TA-Lib's rule: one body edge inclusive | As referenced. |
+| Harami (and three inside up / down) | Inclusive containment; the direction comes from the first bar's colour | §5.2 inclusive edges. |
+| Tweezer bottom / top | Black then white with equal lows / white then black with equal highs | Bulkowski's colour order. |
+| Rising / falling three methods | Three short bodies inside the first bar's range; the fifth bar opens "near" the fourth close | A strict open beyond the fourth close rarely happens on 24/7 bars. |
+| Three line strike | Bars 2 and 3 open within the previous body (with "near"); the strike opens near the third close | §5.2 tolerances. |
+| Hikkake | TA-Lib's strict inside bar; confirmed by a close beyond the inside bar within three bars of the false break; first confirmation only | As referenced. |
+| Pin bar | Body in the top (bottom) third, tail ≥ 2 × body, opposite shadow very short | Written out from §6.6. |
+| Inside bar | Inclusive containment, with a smaller range than the previous bar | Two identical bars are not "inside". |
+| Long lower / upper wick | Shadow ≥ 2 × body and ≥ half the range | As §6.6. |
+
 ## 7. Display and interaction (phase 1)
 
 **Labels.**
@@ -326,7 +349,7 @@ These have their own group in Settings, and they are shown only when no classica
 **Rendering constraints.**
 - **Identity:** every label, bracket and open detail is keyed by the candle's open timestamp, not its index, and is
   re-applied after every redraw.
-- **Hover:** uses `motion_notify_event` with blitting, and redraws only when the hovered label changes.
+- **Hover:** uses `motion_notify_event`, and redraws (`draw_idle`) only when the hovered label changes.
 - **Click:** uses `button_press_event`.
 - **Scope:** detection covers only the displayed coin and timeframe.
 
@@ -448,15 +471,20 @@ that nothing reads (`dark_theme`), and this must not become another.
 
 ## 9. Colour and accessibility
 
-**Criteria for every palette.** These are checked by a test that composites each colour at its drawn alpha:
+**Criteria.** These are checked by a test that composites each colour at its drawn alpha (0.9) on `DARK_PANEL`:
 1. each candle colour is at least 3:1 against `DARK_PANEL` (WCAG 1.4.11), also under simulated protanopia and
    deuteranopia (Machado 2009);
 2. up and down differ by ΔE2000 ≥ 20 under both simulations, or `hollow_up` is on.
 
 **The palettes.**
-- **`default`** keeps today's colours. It meets 1.4.11 for typical vision, but up and down are close for protanopes
-  (ΔE2000 about 7). That is why `hollow_up` exists and works with any palette. It is also the white/black convention
-  behind the names "three white soldiers" and "three black crows".
+- **`default`** keeps today's colours, by the owner's choice, so it is held to criterion 1 for **typical vision only**.
+  - Typical vision: up 3.07:1, down 3.79:1.
+  - Under simulation it misses: protanopia gives a down candle of 2.41:1 and ΔE2000 7.4; deuteranopia gives an up
+    candle of 2.94:1.
+  - That is why `hollow_up` exists and works with any palette. It is also the white/black convention behind the names
+    "three white soldiers" and "three black crows".
+- **`blue_vermilion`** meets both criteria in full: at least 3.16:1 against the panel and ΔE2000 about 50, under all
+  three views.
 - **`blue_vermilion`**: up #56B4E9 (sky blue), down #D55E00 (vermilion).
   - Both lie along the blue–yellow axis that dichromats keep.
   - Both stay clear of the overlay colours: ΔE2000 about 43 from the blue level line, and about 18 from the orange one.
@@ -629,7 +657,10 @@ Phase 2 needs:
    - **Storage:** the `chart` key round-trips through `gui_settings`. Missing keys take defaults, unknown keys are kept,
      and a newly added pattern defaults to on.
    - **Reset to defaults** restores §8.5.
-7. **Colour (test).** Both palettes meet §9's criteria, computed in the test. `hollow_up` draws up bodies with no fill.
+7. **Colour (test).** Computed in the test:
+   - `blue_vermilion` meets both §9 criteria under all three views;
+   - `default` is unchanged and meets 3:1 for typical vision;
+   - `hollow_up` draws up bodies with no fill.
 8. **No published numbers (test).** No pattern description, label or detail text contains a percentage or a published
    hit rate.
 9. **Nothing else changes.**

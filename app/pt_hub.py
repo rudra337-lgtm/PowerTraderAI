@@ -29,6 +29,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter
 from matplotlib.transforms import blended_transform_factory
 
+import chart_settings
 import pt_paths
 
 try:
@@ -958,8 +959,20 @@ class CandleChart(ttk.Frame):
         self.neural_status_label = ttk.Label(top, text="Neural: N/A")
         self.neural_status_label.pack(side="left", padx=(12, 0))
 
+        # Candlestick patterns (FDS-CHART-001): a status line (click: list of all
+        # detections) and the Chart settings pop-out.
+        self.patterns_status_label = ttk.Label(top, text="", cursor="hand2")
+        self.patterns_status_label.pack(side="left", padx=(12, 0))
+
         self.last_update_label = ttk.Label(top, text="Last: N/A")
         self.last_update_label.pack(side="right")
+
+        ttk.Button(
+            top,
+            text="\u2699 Chart",
+            width=8,
+            command=lambda: self.event_generate("<<OpenChartSettings>>", when="tail"),
+        ).pack(side="right", padx=(0, 8))
 
         # Figure
         # IMPORTANT: keep a stable DPI and resize the figure to the widget's pixel size.
@@ -1023,6 +1036,10 @@ class CandleChart(ttk.Frame):
 
         self._last_refresh = 0.0
 
+        from pt_chart_patterns import PatternLayer
+
+        self.pattern_layer = PatternLayer(self, status_label=self.patterns_status_label)
+
     def _apply_dark_chart_style(self) -> None:
         """Apply dark styling (called on init and after every ax.clear())."""
         try:
@@ -1045,6 +1062,13 @@ class CandleChart(ttk.Frame):
         avg_cost_basis: Optional[float] = None,
     ) -> None:
         cfg = self.settings_getter()
+        chart_cfg = chart_settings.normalize(cfg.get("chart"))
+        candle_colors = chart_settings.palette(chart_cfg)
+        hollow_up = chart_cfg["candle_style"] == "hollow_up"
+
+        def show(key: str) -> bool:
+            # each overlay can be hidden from Chart settings (FDS-CHART-001 8.2)
+            return chart_settings.overlay_on(chart_cfg, key)
 
         tf = self.timeframe_var.get().strip()
         limit = int(cfg.get("candles_limit", 120))
@@ -1121,6 +1145,7 @@ class CandleChart(ttk.Frame):
 
         if not candles:
             self.ax.set_title(f"{self.coin} ({tf}) - no candles", color=DARK_FG)
+            self.pattern_layer.update([], tf, folder, chart_cfg)
             self.canvas.draw_idle()
             return
 
@@ -1138,7 +1163,7 @@ class CandleChart(ttk.Frame):
             l = float(c["low"])
 
             up = cl >= o
-            candle_color = "green" if up else "red"
+            candle_color = candle_colors["up"] if up else candle_colors["down"]
 
             # wick
             self.ax.plot([i, i], [l, h], linewidth=1, color=candle_color)
@@ -1154,9 +1179,11 @@ class CandleChart(ttk.Frame):
                     (i - 0.35, bottom),
                     0.7,
                     height,
-                    facecolor=candle_color,
+                    # "hollow up": rising candles as outlines, so direction never
+                    # depends on colour alone (FDS-CHART-001 section 9)
+                    facecolor="none" if (hollow_up and up) else candle_color,
                     edgecolor=candle_color,
-                    linewidth=1,
+                    linewidth=1.2 if (hollow_up and up) else 1,
                     alpha=0.9,
                 )
             )
@@ -1176,13 +1203,13 @@ class CandleChart(ttk.Frame):
             pass
 
         # Overlay Neural levels (blue long, orange short)
-        for lv in long_levels:
+        for lv in long_levels if show("neural_long") else []:
             try:
                 self.ax.axhline(y=float(lv), linewidth=1, color="blue", alpha=0.8)
             except Exception:
                 pass
 
-        for lv in short_levels:
+        for lv in short_levels if show("neural_short") else []:
             try:
                 self.ax.axhline(y=float(lv), linewidth=1, color="orange", alpha=0.8)
             except Exception:
@@ -1190,7 +1217,7 @@ class CandleChart(ttk.Frame):
 
         # Overlay Trailing PM line (sell) and next DCA line
         try:
-            if trail_line is not None and float(trail_line) > 0:
+            if show("trail") and trail_line is not None and float(trail_line) > 0:
                 self.ax.axhline(
                     y=float(trail_line), linewidth=1.5, color="green", alpha=0.95
                 )
@@ -1198,7 +1225,7 @@ class CandleChart(ttk.Frame):
             pass
 
         try:
-            if dca_line_price is not None and float(dca_line_price) > 0:
+            if show("dca") and dca_line_price is not None and float(dca_line_price) > 0:
                 self.ax.axhline(
                     y=float(dca_line_price), linewidth=1.5, color="red", alpha=0.95
                 )
@@ -1207,7 +1234,7 @@ class CandleChart(ttk.Frame):
 
         # Overlay avg cost basis (yellow)
         try:
-            if avg_cost_basis is not None and float(avg_cost_basis) > 0:
+            if show("avg") and avg_cost_basis is not None and float(avg_cost_basis) > 0:
                 self.ax.axhline(
                     y=float(avg_cost_basis), linewidth=1.5, color="yellow", alpha=0.95
                 )
@@ -1216,7 +1243,11 @@ class CandleChart(ttk.Frame):
 
         # Overlay current ask/bid prices
         try:
-            if current_buy_price is not None and float(current_buy_price) > 0:
+            if (
+                show("ask")
+                and current_buy_price is not None
+                and float(current_buy_price) > 0
+            ):
                 self.ax.axhline(
                     y=float(current_buy_price),
                     linewidth=1.5,
@@ -1227,7 +1258,11 @@ class CandleChart(ttk.Frame):
             pass
 
         try:
-            if current_sell_price is not None and float(current_sell_price) > 0:
+            if (
+                show("bid")
+                and current_sell_price is not None
+                and float(current_sell_price) > 0
+            ):
                 self.ax.axhline(
                     y=float(current_sell_price), linewidth=1.5, color="teal", alpha=0.95
                 )
@@ -1277,11 +1312,15 @@ class CandleChart(ttk.Frame):
                 )
 
             # Map to your terminology: Ask=buy line, Bid=sell line
-            _label_right(current_buy_price, "ASK", "purple")
-            _label_right(current_sell_price, "BID", "teal")
-            _label_right(avg_cost_basis, "AVG", "yellow")
-            _label_right(dca_line_price, "DCA", "red")
-            _label_right(trail_line, "SELL", "green")
+            for key, y_val, tag, color in (
+                ("ask", current_buy_price, "ASK", "purple"),
+                ("bid", current_sell_price, "BID", "teal"),
+                ("avg", avg_cost_basis, "AVG", "yellow"),
+                ("dca", dca_line_price, "DCA", "red"),
+                ("trail", trail_line, "SELL", "green"),
+            ):
+                if show(key):
+                    _label_right(y_val, tag, color)
 
         except Exception:
             pass
@@ -1290,7 +1329,7 @@ class CandleChart(ttk.Frame):
         try:
             trades = (
                 _read_trade_history_jsonl(self.trade_history_path)
-                if self.trade_history_path
+                if self.trade_history_path and show("trades")
                 else []
             )
             if trades:
@@ -1407,10 +1446,20 @@ class CandleChart(ttk.Frame):
         except Exception:
             pass
 
+        # Candlestick pattern labels (FDS-CHART-001): drawn last, placed by open time
+        try:
+            self.pattern_layer.update(candles, tf, folder, chart_cfg)
+        except Exception:
+            pass
+
         self.canvas.draw_idle()
 
         self.neural_status_label.config(
-            text=f"Neural: long={long_sig} short={short_sig} | levels L={len(long_levels)} S={len(short_levels)}"
+            text=(
+                f"Neural: long={long_sig} short={short_sig} | levels L={len(long_levels)} S={len(short_levels)}"
+                if show("neural_readout")
+                else ""
+            )
         )
 
         # show file update time if possible
@@ -2002,6 +2051,8 @@ class PowerTraderHub(tk.Tk):
 
         # Refresh charts immediately when a timeframe is changed (don't wait for the 10s throttle).
         self.bind_all("<<TimeframeChanged>>", self._on_timeframe_changed)
+        # the toolbar button on each coin chart (FDS-CHART-001 section 8.1)
+        self.bind_all("<<OpenChartSettings>>", lambda e: self.open_chart_settings())
 
         self._last_chart_refresh = 0.0
 
@@ -7254,6 +7305,44 @@ Platform: {sys.platform}
 
     # ---- settings dialog ----
 
+    # ---- Chart settings pop-out (FDS-CHART-001 section 8) ----
+
+    def open_chart_settings(self, parent=None):
+        """Open (or raise) the Chart settings pop-out: a toggle for every chart overlay
+        and candlestick pattern. Each change is saved and redrawn at once."""
+        from pt_chart_patterns import ChartSettingsWindow
+
+        win = getattr(self, "_chart_settings_win", None)
+        try:
+            if win is not None and win.winfo_exists():
+                win.deiconify()
+                win.lift()
+                win.focus_set()
+                return win
+        except tk.TclError:
+            pass
+        win = ChartSettingsWindow(
+            parent or self, self.settings.get("chart"), self._apply_chart_settings
+        )
+        win.configure(bg=DARK_BG)
+        self._chart_settings_win = win
+        return win
+
+    def _apply_chart_settings(self, chart_cfg: dict) -> None:
+        """Save new chart settings and redraw the visible coin chart; the others pick
+        them up when they are next shown."""
+        self.settings["chart"] = chart_settings.normalize(chart_cfg)
+        try:
+            self._save_settings()
+        except Exception as exc:
+            print(f"Chart settings not saved: {exc}")
+        try:
+            page = getattr(self, "_current_chart_page", "ACCOUNT")
+            if page and page != "ACCOUNT" and hasattr(self, "_show_chart_page"):
+                self._show_chart_page(page)
+        except Exception:
+            pass
+
     def open_settings_dialog(self) -> None:
         win = tk.Toplevel(self)
         win.title("Settings")
@@ -7701,6 +7790,15 @@ Platform: {sys.platform}
         add_row(r, "Chart refresh seconds:", chart_refresh_var)
         r += 1
         add_row(r, "Candles limit:", candles_limit_var)
+        r += 1
+
+        # Chart overlays and candlestick patterns: their own pop-out (FDS-CHART-001)
+        ttk.Label(frm, text="Chart overlays:").grid(row=r, column=0, sticky="w", pady=6)
+        ttk.Button(
+            frm,
+            text="Chart settings\u2026",
+            command=lambda: self.open_chart_settings(parent=win),
+        ).grid(row=r, column=1, sticky="w", pady=6)
         r += 1
 
         # --- Public API Server Section ---
