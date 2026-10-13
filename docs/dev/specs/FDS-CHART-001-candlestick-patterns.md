@@ -5,7 +5,7 @@
 **Branch:** this spec is on `docs/fds-chart-001-candlestick-patterns`, cut from `main` at `8f8c1d0`. Phase 1 is built on `feat/chart-patterns-1`, cut from `main` after this spec is merged.
 **Recommended model:** Claude Opus 5.5, effort high, for the detection module and its tests. Sonnet 5.5, effort high, for the chart and settings wiring.
 **Run log:** `docs/dev/RUN-LOG-chart-patterns-1.md`.
-**Status:** draft for owner review. This version is the owner's UI-CHANGE draft revised after a review on 2026-10-12, with the owner's decisions of that day (§12). Nothing is implemented yet, and this document changes no code, trainer or strategy.
+**Status:** draft for owner review. This version is the owner's UI-CHANGE draft revised after a review on 2026-10-12, with the owner's decisions of 2026-10-12 and 2026-10-13 (§12). Nothing is implemented yet, and this document changes no code, trainer or strategy.
 **Related:** FDS-SIG-001 (`docs/dev/specs/FDS-SIG-001-signal-candidate-audit.md`) and FDS-SIG-002 (`docs/dev/specs/FDS-SIG-002-round-one-candidates.md`). This spec registers nothing with them (§10).
 
 ---
@@ -44,12 +44,16 @@ value on this data** (§10).
 - **Phase 1 (this spec):**
   - detection on Binance closed bars;
   - labels, hover and click detail;
-  - a Chart section in Settings, with an alternate palette and hollow-up candles.
+  - a **Chart settings** pop-out with a planned on/off toggle for every chart overlay: each existing line, the markers,
+    the Neural readout, and each candlestick pattern and pattern group (§8);
+  - an alternate palette and hollow-up candles.
 - **Phase 2 (a separate spec):** timeframe drill-down (§11). It needs new fetch work and is not part of phase 1.
 - **Non-goals:**
   - No detection result reaches `strategy.engine`, the trainer, the runner, the trader or paper trading.
-  - The existing overlay lines and the Neural readout are unchanged. Their contrast problems are noted in §9, for a
-    separate change.
+  - The existing overlays are drawn exactly as today, with the same colours, values and positions. The only change is
+    that each one can be hidden from Chart settings (§8), and every one is shown by default. Their contrast problems
+    are noted in §9, for a separate change.
+  - Hiding an overlay never changes what the runner, trader or trainer compute or do.
   - **No percentage from published sources appears anywhere in the UI** (§10).
   - The candle source of the chart itself does not change.
 
@@ -138,7 +142,7 @@ the bars its averages need (13 for the trend rule, 10 for R(10) and B(10)).
   3. then the order in the §6 tables.
 
   The rest are shown as a "+n" badge, expanded on hover.
-- **Cap:** at most 12 labels per chart, in this priority:
+- **Cap:** at most 12 labels per chart by default ("Max labels per chart", §8.3), in this priority:
   1. the pinned Three White Soldiers and Three Black Crows (§6.3);
   2. then by bar count;
   3. then by recency.
@@ -334,22 +338,113 @@ These have their own group in Settings, and they are shown only when no classica
   whose output is the blue and orange level lines.
 - **Placement:** the module stays out of `app/strategies/`, so it carries no strategy meaning.
 
-## 8. Settings
+## 8. Chart settings (pop-out)
 
-A new **Chart** section in the Settings window, saved in `gui_settings` and global for all coins:
+Users want different things on the chart. One user may not care about doji stars; another may want only bullish
+patterns, or no position lines at all. So every overlay the chart can draw gets its own planned toggle.
 
-| Key | Values |
+### 8.1 Where it lives and how it behaves
+
+- **Opening it:** a **Chart settings…** button in the Settings window opens a non-modal pop-out (a Tk `Toplevel`). The
+  same pop-out also opens from a small ⚙ button on each chart's toolbar. Only one is open at a time.
+- **Applying changes:** a change applies at once to every open chart, with an immediate redraw and no restart. It is
+  saved to `gui_settings`.
+- **Scope:** settings are global, the same for every coin and timeframe.
+- **Buttons:** each tab has **All on** and **All off**. The window also has **Reset to defaults**, which restores
+  §8.5.
+- **Defaults:** every existing overlay is on, so the chart looks exactly as it does today until the user changes
+  something.
+
+The pop-out has three tabs: Overlays, Candlestick patterns and Appearance.
+
+### 8.2 Overlays tab: the existing chart overlays
+
+| Toggle | What it shows or hides | Default |
+|---|---|---|
+| Neural long levels | the blue full-width lines (one per long level) | on |
+| Neural short levels | the orange full-width lines (one per short level) | on |
+| Neural readout | the toolbar text "Neural: long=… short=… \| levels L=… S=…" | on |
+| Ask price | the purple ASK line and its right-edge label | on |
+| Bid price | the teal BID line and its right-edge label | on |
+| Average cost | the yellow AVG line and its right-edge label | on |
+| Next DCA level | the red DCA line and its right-edge label | on |
+| Trailing sell line | the green SELL line and its right-edge label | on |
+| Trade markers | the BUY, DCA and SELL dots and their labels | on |
+
+Each line and its right-edge label are toggled together, so a label never floats without its line. Hiding an overlay
+only skips drawing it. Nothing upstream changes (§3).
+
+### 8.3 Candlestick patterns tab
+
+- **Master toggle:** "Show candlestick patterns".
+- **Filters,** one checkbox each:
+
+  | Filter group | Checkboxes |
+  |---|---|
+  | Direction | Bullish, Bearish, No direction |
+  | Type | Reversal, Continuation, Indecision |
+  | Family | Classical, Price action (§6.6) |
+
+- **Patterns:** one checkbox per §6 row, grouped as in §6 (1 bar, 2 bars, 3 bars, 4 or more bars, price action). Each
+  row shows its glyph (▲ ▼ ◆) and its tags, so the user can see which filters apply to it.
+- **Display options:**
+  - "Max labels per chart" (1–30), with the §5.4 cap as its default;
+  - "Show what happened next" (the after-pattern arrow, §7).
+
+**Visibility rule.** A pattern is shown when **all** of these hold:
+1. the master toggle is on;
+2. its own checkbox is on;
+3. **every** filter it belongs to is on.
+
+So unticking one filter hides every pattern in it, whatever their own checkboxes say. Two examples:
+- **Only bullish patterns:** untick Bearish and No direction.
+- **No doji stars:** untick Morning doji star (24/7) and Evening doji star (24/7). To drop every doji-type pattern,
+  untick Indecision.
+
+**The two pinned patterns.** Three white soldiers and three black crows are shown ticked and greyed out, with the note
+"always visible (owner decision)". They ignore the master toggle, the filters and their own checkbox (§6.3). §12.3 item 10 asks
+whether to keep that exemption now that users can tailor everything else.
+
+### 8.4 Appearance tab
+
+| Setting | Values (stored as) |
 |---|---|
-| `chart_palette` | `"default"` or `"blue_vermilion"` (§9) |
-| `chart_candle_style` | `"filled"` (today) or `"hollow_up"` (up bodies hollow, down filled) |
-| `chart_pattern_visibility` | `{"groups": {"bullish": true, ...}, "patterns": {"hammer": true, ...}}` |
+| Palette | Default (`"default"`), or Blue / vermilion (`"blue_vermilion"`) (§9) |
+| Candle style | Filled (`"filled"`, today), or Hollow up (`"hollow_up"`: up bodies hollow, down filled) |
 
-**Visibility rule.** A pattern is shown when its own toggle is on **and** none of its tags is switched off. The tag
-groups are `bullish`, `bearish`, `none`, `reversal`, `continuation`, `indecision`, plus a `price_action` group for §6.6.
-Three white soldiers and three black crows are shown locked on, with the reason "always visible (owner decision)".
+### 8.5 Storage
 
-`CandleChart` must read all three keys, and a test checks it. The repo already has one saved setting that nothing reads
-(`dark_theme`), and this must not become another.
+All of these go in one `gui_settings` key, `chart`. Its defaults are:
+
+```json
+"chart": {
+  "overlays": {
+    "neural_long": true, "neural_short": true, "neural_readout": true,
+    "ask": true, "bid": true, "avg": true, "dca": true, "trail": true, "trades": true
+  },
+  "patterns": {
+    "enabled": true,
+    "filters": {
+      "bullish": true, "bearish": true, "none": true,
+      "reversal": true, "continuation": true, "indecision": true,
+      "classical": true, "price_action": false
+    },
+    "items": {"hammer": true, "...": true},
+    "max_labels": 12,
+    "next_arrows": true
+  },
+  "palette": "default",
+  "candle_style": "filled"
+}
+```
+
+- **Missing keys** take their defaults, so an older settings file still works.
+- **Unknown keys** are kept but ignored.
+- **A pattern added later** defaults to on.
+- **Pattern ids** are stable snake_case names from §6, for example `morning_doji_star_247`.
+
+`CandleChart` must read the whole `chart` key, and a test checks every toggle. The repo already has one saved setting
+that nothing reads (`dark_theme`), and this must not become another.
 
 ## 9. Colour and accessibility
 
@@ -469,7 +564,14 @@ Phase 2 needs:
 6. **Three white soldiers and three black crows are always visible** (§6.3).
 7. **In-neck is dropped.**
 
-### 12.2 Defaults this spec sets, to confirm before phase 1
+### 12.2 Added on 2026-10-13
+
+8. **Every chart overlay gets a planned on/off toggle,** in a Chart settings pop-out reached from the Settings window
+   (§8). That covers each existing line and the markers, the Neural readout, every candlestick pattern, and the pattern
+   groups. The reason: whatever a user wants (no doji stars, only bullish patterns, no position lines), the chart must
+   support it.
+
+### 12.3 Defaults this spec sets, to confirm before phase 1
 
 1. **The same "meaning of the gap" rule applied to patterns the decision did not name:**
    - Doji star (2-bar) is dropped, because its meaning survives in the doji-star variants;
@@ -478,11 +580,20 @@ Phase 2 needs:
 2. **Tower bottom** is dropped until it has a definition.
 3. **Doji against R(10) rather than the bar's own range,** and TA-Lib's default thresholds throughout (§5.2).
 4. **The trend rule:** SMA₁₀ with a 3-bar slope (§5.3).
-5. **One label per candle, with a cap of 12,** and the precedence order (§5.4).
+5. **One label per candle,** a default cap of 12 that the user can change from 1 to 30, and the precedence order
+   (§5.4, §8.3).
 6. **Pinned thresholds** for three white soldiers and three black crows (§6.3).
-7. **Price-action patterns in their own group,** shown only where no classical pattern matched (§6.6).
-8. **Settings keys, global scope, and the visibility rule** (§8).
+7. **Price-action patterns in their own group,** shown only where no classical pattern matched, with that group **off
+   by default** (§6.6, §8.5).
+8. **The Chart settings design (§8):**
+   - three tabs, and global scope;
+   - the "all filters must be on" visibility rule;
+   - every existing overlay on by default;
+   - one `chart` key in `gui_settings`.
 9. **The `blue_vermilion` palette and the `hollow_up` option** (§9).
+10. **The pinned exemption.** Should three white soldiers and three black crows stay always visible, ignoring every
+    toggle (§12.1 item 6)? Or, now that users can tailor everything else (§12.2), should they become default-on
+    patterns the user can hide?
 
 ## 13. Acceptance criteria (phase 1)
 
@@ -505,15 +616,26 @@ Phase 2 needs:
    - placement by open timestamp, surviving a redraw and a one-bar shift;
    - merging, precedence, the "+n" badge, and the cap of 12 with the hidden-count note;
    - glyphs and `DARK_FG` text.
-6. **Settings (tests).** `CandleChart` reads the three `gui_settings` keys, the visibility rule is applied as written,
-   and the pinned patterns cannot be hidden.
+6. **Chart settings (tests):**
+   - The pop-out opens from the Settings window and from the chart toolbar, and only one is open at a time.
+   - **Overlays:** each §8.2 toggle hides exactly its own element (its line and label, the markers or the readout) and
+     nothing else, checked against the drawn artists of a rendered test chart.
+   - **Defaults** reproduce today's chart: the same artists as before this change.
+   - **Patterns:** the §8.3 visibility rule holds, including the two worked examples ("only bullish" and "no doji
+     stars"). The master toggle and every filter work, and the pinned patterns cannot be hidden. "Max labels" and
+     "Show what happened next" take effect.
+   - **Appearance:** the palette and candle style take effect.
+   - **Applying:** a change applies to every open chart at once, without a restart.
+   - **Storage:** the `chart` key round-trips through `gui_settings`. Missing keys take defaults, unknown keys are kept,
+     and a newly added pattern defaults to on.
+   - **Reset to defaults** restores §8.5.
 7. **Colour (test).** Both palettes meet §9's criteria, computed in the test. `hollow_up` draws up bodies with no fill.
 8. **No published numbers (test).** No pattern description, label or detail text contains a percentage or a published
    hit rate.
 9. **Nothing else changes.**
    - No import of `candlestick_patterns` from `strategies`, `signal_engine`, `pt_trader`, `pt_thinker` or the trainer
      (test).
-   - The overlay lines and the Neural readout are unchanged.
+   - The overlays are drawn as before when shown, and hiding one changes nothing outside the chart (test).
 10. **Suite and network.** No test touches the network. The full suite (`app/tests` and `app/test_*.py`) is no worse
     than `main`.
 
