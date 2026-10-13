@@ -558,7 +558,8 @@ with no verdict.
   6 years; three white soldiers about 57–86 years.
 - **The audit's coverage:** only 1h and 4h, and only the 10 largest Binance coins. The chart offers 11 timeframes and
   the user's own coins.
-- **Indecision patterns** have no direction to test.
+- **Indecision patterns** are not audit candidates. Seven have no direction. Dragonfly doji (bullish) and gravestone
+  doji (bearish) do have one, but they are left out as a kind (FDS-SIG-003 §4.3).
 
 This is the expected state, not a gap to fill with published figures.
 
@@ -589,8 +590,8 @@ What these numbers are:
 Candlestick patterns use OHLC only, so they meet FDS-SIG-001 §4's data rule, but registering them pattern by pattern
 does not work:
 - **No coverage:** individual patterns never reach the 1,000-call minimum (§10.2).
-- **Too many tests:** about 60 rules × 10 coins × 2 timeframes × 2 statistics gives F ≈ 2,400, so Holm's first step is
-  z ≈ 4.1, and the smallest detectable edge at the minimum rises to about 11 points.
+- **Too many tests:** the 37 patterns that have a direction and are not indecision patterns, × 10 coins × 2 timeframes
+  × 2 statistics, give F = 1,480, so Holm's first step is z ≥ 3.99 (FDS-SIG-003 §3).
 
 If they are ever audited, it should be as **a few pooled rules**, each registered as one two-sided candidate in its own
 round, so SIG-A and SIG-B keep z ≥ 3.21. For example: "any bullish-tagged pattern → up, any bearish-tagged → down,

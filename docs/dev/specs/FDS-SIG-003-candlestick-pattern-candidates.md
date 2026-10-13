@@ -81,7 +81,7 @@ history a pattern has.
 | Bullish engulfing | 88 | 1,432 |
 | Hammer | 37 | 3,407 |
 | Morning star | 13 | 9,696 |
-| Three white soldiers | 1 | about 126,000 |
+| Three white soldiers | 1 | too few to estimate (FDS-CHART-001 §10.2: 57–86 years) |
 | Three black crows | 0 | none seen |
 
 Only the two long-wick patterns reach the 1,000-call floor (FDS-SIG-001 §6) inside a year of 1h bars. If the per-bar
