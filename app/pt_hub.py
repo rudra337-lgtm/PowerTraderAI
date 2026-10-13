@@ -2237,6 +2237,24 @@ class PowerTraderHub(tk.Tk):
         except Exception:
             pass
 
+        try:
+            style.configure(
+                "TSpinbox",
+                fieldbackground=DARK_PANEL,
+                background=DARK_PANEL,
+                foreground=DARK_FG,
+                bordercolor=DARK_BORDER,
+                arrowcolor=DARK_ACCENT,
+                insertcolor=DARK_FG,
+            )
+            style.map(
+                "TSpinbox",
+                fieldbackground=[("readonly", DARK_PANEL), ("focus", DARK_PANEL2)],
+                foreground=[("readonly", DARK_FG)],
+            )
+        except Exception:
+            pass
+
         # Notebooks
         try:
             style.configure("TNotebook", background=DARK_BG, bordercolor=DARK_BORDER)

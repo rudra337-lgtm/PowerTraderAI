@@ -20,6 +20,7 @@ if APP_DIR not in sys.path:
 
 import candlestick_patterns as cp  # noqa: E402
 import chart_settings as cs  # noqa: E402
+from test_candlestick_patterns import NOT_ON_SCREEN  # noqa: E402
 from market_data import listing  # noqa: E402
 
 HOUR = 3600
@@ -42,12 +43,21 @@ INDECISION_AND_NO_DIRECTION = {
 }
 
 
-def test_defaults_show_every_existing_overlay_and_hide_price_action():
+def test_defaults_show_every_existing_overlay_and_the_owners_filters():
     cfg = cs.normalize(None)
     assert all(cfg["overlays"].values()) and len(cfg["overlays"]) == len(cs.OVERLAYS)
     filters = cfg["patterns"]["filters"]
-    assert filters["price_action"] is False
-    assert all(v for k, v in filters.items() if k != "price_action")
+    # owner decision 2026-10-13
+    assert filters == {
+        "bullish": True,
+        "bearish": True,
+        "none": False,
+        "reversal": True,
+        "continuation": False,
+        "indecision": False,
+        "classical": True,
+        "price_action": True,
+    }
     assert (cfg["patterns"]["max_labels"], cfg["palette"], cfg["candle_style"]) == (
         12,
         "default",
@@ -68,8 +78,10 @@ def test_indecision_and_no_direction_patterns_start_unticked():
     shown = visible_ids(cs.normalize(None))
     assert {"three_white_soldiers", "three_black_crows"} <= shown
     assert not shown & INDECISION_AND_NO_DIRECTION
-    ticked = cs.normalize({"patterns": {"items": {"doji": True}}})
-    assert "doji" in visible_ids(ticked)
+    ticked = {"items": {"doji": True}}
+    assert "doji" not in visible_ids(cs.normalize({"patterns": ticked}))
+    ticked["filters"] = {"none": True, "indecision": True}
+    assert "doji" in visible_ids(cs.normalize({"patterns": ticked}))
 
 
 def test_missing_keys_take_defaults_and_unknown_keys_are_kept():
@@ -533,7 +545,7 @@ def test_a_coin_recorded_not_trading_gets_a_note_and_no_fetch(make_chart):
     refresh(chart)
     assert (
         chart.patterns_status_label.cget("text")
-        == "Candlestick patterns: no Binance market"
+        == "Candlestick patterns: not available for this coin"
     )
     assert chart.fake_binance.calls == []
 
@@ -552,7 +564,7 @@ def test_a_failed_fetch_is_a_note_not_an_error(make_chart):
     chart.pattern_layer.wait()
     assert (
         chart.patterns_status_label.cget("text")
-        == "Candlestick patterns: no Binance market"
+        == "Candlestick patterns: not available for this coin"
     )
 
 
@@ -563,12 +575,12 @@ def test_the_label_cap_hides_the_rest_and_says_so(make_chart):
         c = 100.05 if k % 3 else 100.4
         rows.append((o, 100.9, 99.5, c))
     bars = [cp.Bar(T0 + k * HOUR, *r) for k, r in enumerate(rows)]
-    ticked = {i: True for i in INDECISION_AND_NO_DIRECTION}  # off by default
-    chart = make_chart(
-        as_candles(bars),
-        chart_cfg={"patterns": {"max_labels": 2, "items": ticked}},
-        bars=bars,
-    )
+    ticked = {  # off by default
+        "items": {i: True for i in INDECISION_AND_NO_DIRECTION},
+        "filters": {"none": True, "indecision": True},
+        "max_labels": 2,
+    }
+    chart = make_chart(as_candles(bars), chart_cfg={"patterns": ticked}, bars=bars)
     refresh(chart)
     chart.pattern_layer.wait()
     assert len(chart.pattern_layer.records) == 2
@@ -594,8 +606,10 @@ def test_hover_brackets_click_explains_and_the_keyboard_steps(make_chart):
     assert "Bullish engulfing" in text and "Trend into: falling" in text
     win = layer.open_detail(rec)
     body = "\n".join(layer.detail_lines(rec["label"]))
-    assert "Not measured on this data." in body and "textbook meaning" in body
-    assert "Binance spot closed bars" in body and "%" not in body
+    assert "After a fall: a white body that covers" in body
+    assert "Reference: TA-Lib (CDLENGULFING)" in body and "%" not in body
+    shown = (text + body).lower()
+    assert not [w for w in NOT_ON_SCREEN if w in shown]
     layer.close_detail()
     assert not win.winfo_exists()
     layer._on_key(types.SimpleNamespace(key="right"))
@@ -655,6 +669,43 @@ def test_the_pop_out_applies_each_change_at_once_and_keeps_unknown_keys(tk_root)
     )
     assert reset["patterns"]["items"] == cs.defaults()["patterns"]["items"]
     assert reset["future"] == 1
+    win.destroy()
+
+
+def test_the_pop_out_text_names_no_spec_provider_or_design_decision(tk_root):
+    from pt_chart_patterns import ChartSettingsWindow
+
+    win = ChartSettingsWindow(tk_root, {}, lambda cfg: None)
+
+    def walk(w):
+        yield w
+        for child in w.winfo_children():
+            yield from walk(child)
+
+    texts = []
+    for w in walk(win):
+        try:
+            texts.append(str(w.cget("text")).lower())
+        except Exception:
+            pass
+    win.destroy()
+    assert not [w for w in NOT_ON_SCREEN if w in " ".join(texts)]
+
+
+def test_the_pattern_list_has_no_unthemed_strip(tk_root):
+    """The list canvas takes the frame colour and the list fills its width."""
+    import tkinter.ttk as ttk
+
+    from pt_chart_patterns import ChartSettingsWindow
+
+    win = ChartSettingsWindow(tk_root, {}, lambda cfg: None)
+    canvas = win.patterns_canvas
+    frame_bg = ttk.Style(win).lookup("TFrame", "background")
+    assert str(canvas.cget("bg")) == str(frame_bg)
+    list_id = canvas.find_withtag("all")[0]
+    canvas.event_generate("<Configure>", width=480, height=300)
+    win.update_idletasks()
+    assert int(float(canvas.itemcget(list_id, "width"))) == 480
     win.destroy()
 
 

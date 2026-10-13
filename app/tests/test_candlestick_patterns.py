@@ -636,11 +636,37 @@ def test_no_dropped_pattern_has_a_rule():
 # --- no published numbers; display only (section 13 items 8 and 9) -------------------
 
 
+# Owner rule 2026-10-13: displayed text states facts about the coin and textbook
+# definitions only. It never names the spec or its sections, the data provider,
+# or a design decision.
+NOT_ON_SCREEN = (
+    "fds",
+    "section",
+    "\u00a7",
+    "binance",
+    "kucoin",
+    "measured",
+    "forecast",
+    "statistic",
+    "reliab",
+    "variant",
+    "24/7 bars",
+    "not required here",
+    "shown instead",
+    "owner",
+)
+
+
+def test_pattern_text_states_only_textbook_definitions():
+    for p in cp.PATTERNS:
+        text = " ".join([p.name, p.explanation, p.reference, p.note]).lower()
+        assert not [w for w in NOT_ON_SCREEN if w in text], p.id
+
+
 def test_no_pattern_text_carries_a_percentage_or_hit_rate():
     texts = []
     for p in cp.PATTERNS:
         texts += [p.name, p.explanation, p.reference, p.note]
-    texts.append(cp.reliability_line("hammer", "BTC", "1hour"))
     bad = [
         t
         for t in texts

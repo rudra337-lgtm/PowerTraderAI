@@ -80,8 +80,8 @@ class PatternResult:
 def _describe_error(exc: BaseException) -> str:
     cause = getattr(exc, "__cause__", None)
     if getattr(cause, "code", None) == 400:
-        return "no Binance market"
-    return f"unavailable ({type(exc).__name__})"
+        return "not available for this coin"
+    return "unavailable right now"
 
 
 class PatternLayer:
@@ -218,7 +218,7 @@ class PatternLayer:
         reason = not_trading_reason(coin_folder) if coin_folder else None
         step = self._step()
         if reason:
-            self._note = "Candlestick patterns: no Binance market"
+            self._note = "Candlestick patterns: not available for this coin"
         elif step is None:
             self._note = f"Candlestick patterns: timeframe {tf} not supported"
         elif not candles:
@@ -539,9 +539,7 @@ class PatternLayer:
         d, p = lb.detection, lb.pattern
         lines = [f"{p.glyph} {p.name}", p.explanation]
         if p.trend:
-            lines.append(
-                f"Trend into: {'falling' if d.trend == 'down' else 'rising'} (10-bar average rule)"
-            )
+            lines.append(f"Trend into: {'falling' if d.trend == 'down' else 'rising'}")
         if self._cfg["patterns"]["next_arrows"]:
             if d.next_move:
                 word = {"up": "higher", "down": "lower", "flat": "about level"}[
@@ -571,23 +569,18 @@ class PatternLayer:
             f"Bars: {bars}, {_fmt_ts(d.first_ts)} to {_fmt_ts(d.last_ts + step)}",
             f"Direction: {p.direction}   Type: {p.kind}   Family: "
             f"{'classical' if p.family == 'classical' else 'price action'}",
-            "These tags are the textbook meaning, not measured behaviour.",
             "",
             p.explanation,
         ]
         if p.note:
             lines.append(p.note)
-        lines.append("Detected on Binance spot closed bars.")
         if p.trend:
             lines.append(
-                f"Trend into the pattern: {'falling' if d.trend == 'down' else 'rising'}"
-                " (close below/above a falling/rising 10-bar average)."
+                f"Trend into the pattern: {'falling' if d.trend == 'down' else 'rising'}."
             )
         if d.next_move:
             word = {"up": "higher", "down": "lower", "flat": "about level"}[d.next_move]
-            lines.append(
-                f"What happened next: {word} {d.next_after} bars later (not a forecast)."
-            )
+            lines.append(f"What happened next: {word} {d.next_after} bars later.")
         if lb.others:
             lines.append(
                 "Also on this candle: "
@@ -596,11 +589,6 @@ class PatternLayer:
         lines += [
             "",
             f"Reference: {p.reference}" + (f" ({p.url})" if p.url else ""),
-            "Published statistics are not shown: they were measured on other markets and "
-            "metrics (FDS-CHART-001 section 10).",
-            "",
-            "Reliability on this data: "
-            + cp.reliability_line(p.id, self.chart.coin, self._tf),
         ]
         if r is not None and r.error:
             lines.append(f"(data: {r.error})")
@@ -804,22 +792,29 @@ class ChartSettingsWindow(tk.Toplevel):
         ).pack(side="left")
         ttk.Label(
             top,
-            text="A pattern shows only when its own box and every filter it belongs to are on. "
-            "Indecision patterns start unticked. "
-            "Tags are textbook meaning, not measured behaviour.",
+            text="A pattern shows only when its own box and every filter it belongs to are on.",
             wraplength=560,
         ).pack(anchor="w", pady=(4, 2))
 
         # scrollable pattern list
         holder = ttk.Frame(outer)
         holder.pack(fill="both", expand=True, padx=8, pady=4)
+        # a plain Tk canvas ignores the ttk theme: give it the frame colour, and stretch
+        # the list to the canvas width, so no unthemed strip shows beside the list
         canvas = tk.Canvas(holder, highlightthickness=0, bd=0)
+        frame_bg = ttk.Style(self).lookup("TFrame", "background")
+        if frame_bg:
+            canvas.configure(bg=frame_bg)
+        self.patterns_canvas = canvas
         bar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
         inner = ttk.Frame(canvas)
         inner.bind(
             "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        canvas.create_window((0, 0), window=inner, anchor="nw")
+        list_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.bind(
+            "<Configure>", lambda e: canvas.itemconfigure(list_id, width=e.width)
+        )
         canvas.configure(yscrollcommand=bar.set)
         canvas.pack(side="left", fill="both", expand=True)
         bar.pack(side="right", fill="y")
@@ -858,7 +853,7 @@ class ChartSettingsWindow(tk.Toplevel):
             )
         ttk.Label(
             frm,
-            text="Hollow up draws rising candles as outlines, so direction never depends on colour alone.",
+            text="Hollow up draws rising candles as outlines.",
             wraplength=560,
         ).pack(anchor="w", padx=8, pady=(8, 0))
         return frm

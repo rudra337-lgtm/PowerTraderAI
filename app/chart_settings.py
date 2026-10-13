@@ -57,6 +57,8 @@ FILTER_GROUPS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
     ("Family", (("classical", "Classical"), ("price_action", "Price action"))),
 )
 FILTERS = tuple(key for _, group in FILTER_GROUPS for key, _ in group)
+# owner decision 2026-10-13 (FDS-CHART-001 section 12.2): these filters start off
+FILTERS_OFF_BY_DEFAULT = ("none", "continuation", "indecision")
 
 MAX_LABELS_RANGE = (1, 30)
 
@@ -79,7 +81,7 @@ def defaults() -> Dict[str, Any]:
         "overlays": {key: True for key, _, _ in OVERLAYS},
         "patterns": {
             "enabled": True,
-            "filters": {key: key != "price_action" for key in FILTERS},
+            "filters": {key: key not in FILTERS_OFF_BY_DEFAULT for key in FILTERS},
             "items": {p.id: default_on(p) for p in PATTERNS},
             "max_labels": 12,
             "next_arrows": True,

@@ -137,8 +137,8 @@ class _Ctx:
 
 # --- the pattern library (FDS-CHART-001 section 6) ----------------------------------
 
-BULKOWSKI = "Bulkowski, thepatternsite.com: breakout direction on US stocks, daily bars"
-TALIB = "TA-Lib candlestick definition (definition only, no statistics)"
+BULKOWSKI = "Bulkowski, thepatternsite.com"
+TALIB = "TA-Lib"
 
 
 @dataclass(frozen=True)
@@ -516,7 +516,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "indecision",
         None,
         "A flat bar: open, high, low and close all equal. Usually no trading at all.",
-        "FDS-CHART-001 section 5.2",
+        "Nison, Japanese Candlestick Charting Techniques",
         rule=_four_price,
     ),
     _p(
@@ -621,7 +621,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         BULKOWSKI,
         url="https://thepatternsite.com/HammerInv.html",
         rule=_inverted_shape,
-        note="The textbook form needs a gap down, which 24/7 bars lack; the gap is not required here.",
+        note="Textbook form: gaps down from the previous bar.",
     ),
     _p(
         "shooting_star",
@@ -633,7 +633,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "After a rise: a small body near the bottom and a long upper shadow.",
         TALIB + " (CDLSHOOTINGSTAR)",
         rule=_inverted_shape,
-        note="The textbook form needs a gap up, which 24/7 bars lack; the gap is not required here.",
+        note="Textbook form: gaps up from the previous bar.",
     ),
     _p(
         "belt_hold_bullish",
@@ -737,8 +737,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         BULKOWSKI,
         url="https://www.thepatternsite.com/Piercing.html",
         rule=_piercing,
-        note="24/7 variant: the textbook form needs a gap down, which 24/7 bars lack. "
-        "No published figure applies to this variant.",
+        note="Textbook form: the white bar opens below the black bar's low.",
     ),
     _p(
         "dark_cloud_cover_247",
@@ -751,8 +750,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         BULKOWSKI,
         url="https://www.thepatternsite.com/DarkCloudCover.html",
         rule=_dark_cloud,
-        note="24/7 variant: the textbook form needs a gap up, which 24/7 bars lack. "
-        "No published figure applies to this variant.",
+        note="Textbook form: the black bar opens above the white bar's high.",
     ),
     _p(
         "matching_low",
@@ -774,9 +772,9 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "reversal",
         "up",
         "After a rise: two white bars closing at the same price.",
-        "Mirror of the matching low (secondary sources only)",
+        "Secondary sources: the mirror image of the matching low",
         rule=_matching_high,
-        note="Non-canonical: not in Bulkowski or TA-Lib.",
+        note="Not in Bulkowski or TA-Lib.",
     ),
     # --- three bars (section 6.3)
     _p(
@@ -790,7 +788,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         BULKOWSKI,
         url="https://www.thepatternsite.com/MorningStar.html",
         rule=lambda x, i: _star_down(x, i, doji=False),
-        note="24/7 variant: the textbook star gaps below the first body; 24/7 bars do not gap.",
+        note="Textbook form: the star gaps below the first body.",
     ),
     _p(
         "morning_doji_star_247",
@@ -802,7 +800,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "As the morning star, with a doji in the middle.",
         BULKOWSKI,
         rule=lambda x, i: _star_down(x, i, doji=True),
-        note="24/7 variant: the textbook star gaps below the first body; 24/7 bars do not gap.",
+        note="Textbook form: the star gaps below the first body.",
     ),
     _p(
         "evening_star_247",
@@ -814,7 +812,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "After a rise: a long white bar, a small body above its midpoint, then a black bar closing below it.",
         BULKOWSKI,
         rule=lambda x, i: _star_up(x, i, doji=False),
-        note="24/7 variant: the textbook star gaps above the first body; 24/7 bars do not gap.",
+        note="Textbook form: the star gaps above the first body.",
     ),
     _p(
         "evening_doji_star_247",
@@ -826,7 +824,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "As the evening star, with a doji in the middle.",
         BULKOWSKI,
         rule=lambda x, i: _star_up(x, i, doji=True),
-        note="24/7 variant: the textbook star gaps above the first body; 24/7 bars do not gap.",
+        note="Textbook form: the star gaps above the first body.",
     ),
     _p(
         "three_white_soldiers",
@@ -836,7 +834,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "reversal",
         "down",
         "After a fall: three long white bars, each closing higher and opening inside the previous body.",
-        TALIB + " (CDL3WHITESOLDIERS); thresholds set in FDS-CHART-001 section 6.3",
+        TALIB + " (CDL3WHITESOLDIERS)",
         rule=_soldiers,
     ),
     _p(
@@ -847,7 +845,7 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "reversal",
         "up",
         "After a rise: three long black bars, each closing lower and opening inside the previous body.",
-        TALIB + " (CDL3BLACKCROWS); thresholds set in FDS-CHART-001 section 6.3",
+        TALIB + " (CDL3BLACKCROWS)",
         rule=_crows,
     ),
     _p(
@@ -929,7 +927,6 @@ PATTERNS: Tuple[PatternDef, ...] = (
         BULKOWSKI,
         url="https://www.thepatternsite.com/MatHold.html",
         rule=_mat_hold,
-        note="Bulkowski's rule (no gap). Shown instead of rising three methods when both match.",
     ),
     _p(
         "three_line_strike_white",
@@ -1247,10 +1244,3 @@ HUB_TO_BINANCE = {
 
 # Bars before the first visible candle that detection needs (window + trend + averages)
 WARMUP_BARS = max(p.bars for p in PATTERNS) + max(TREND_BARS, AVG_BARS)
-
-
-def reliability_line(pattern_id: str, coin: str, timeframe: str) -> str:
-    """The detail window's reliability line (FDS-CHART-001 section 10.2). No
-    FDS-SIG-001 round has registered candlestick patterns, so it is always 'not
-    measured'; a registered verdict line would be returned here."""
-    return "Not measured on this data."

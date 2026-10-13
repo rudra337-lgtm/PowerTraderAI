@@ -13,7 +13,7 @@
 ## 1. Objective
 
 Detect classical candlestick patterns on the coin chart and show them as small labels. A user can see which candles a
-pattern used, what its textbook meaning is, and that its reliability on this market has not been measured.
+pattern used and what its textbook definition is.
 
 The point is to make pattern claims inspectable and questionable, not to act on them. Nothing here feeds
 `strategy.engine`, the trainer, the runner or the trader.
@@ -72,7 +72,9 @@ is exactly the event a future FDS-SIG-001 audit would score, on the same venue a
    a missing KuCoin bar, a venue mismatch, or weekly bars aligned differently.
 4. **No Binance market:**
    - If the coin has no Binance spot market, or `market_status.json` records it as not trading (`market_data/listing.py`),
-     the chart shows "Candlestick patterns: no Binance market" and detects nothing.
+     the chart shows "Candlestick patterns: not available for this coin" and detects nothing.
+   - The UI never names Binance (§7.1). The user's trading exchange may be different, so the data source is not
+     shown.
    - The listing check uses the shared cached check, so it adds at most one request per coin per hour.
 5. **Refresh:** detection re-runs only when a new Binance bar has closed for the displayed timeframe, not every 10 s.
 
@@ -152,8 +154,8 @@ the bars its averages need (13 for the trend rule, 10 for R(10) and B(10)).
 
 ## 6. Pattern library
 
-**Tags are textbook meaning, not measured behaviour.** The UI shows "textbook meaning" next to every tag. Bulkowski's
-tests found several patterns behave opposite to their textbook meaning (§10.3).
+**Tags are textbook meaning, not measured behaviour.** Bulkowski's tests found several patterns behave opposite to
+their textbook meaning (§10.3). The UI shows the tags without commentary (§7.1).
 
 Each pattern has a direction (`bullish`, `bearish` or `none`) and a type (`reversal`, `continuation` or `indecision`).
 Rows marked **24/7** replace a textbook gap with a body-position test. They are different rules from the textbook
@@ -197,7 +199,7 @@ The draft's "Bullish/Bearish Spinning Top" referred to body colour, not directio
 
 **Matching low** is two black candles with **equal closes** ("equal", §5.2), not equal lows. Equal lows or highs is the
 Tweezer rule. **Matching high** is the mirror, with two white candles and equal closes. It appears in secondary sources
-only, and the UI marks it "non-canonical". Both are drawn as a short labelled segment between the two closes, never as a
+only, and its detail says "Not in Bulkowski or TA-Lib". Both are drawn as a short labelled segment between the two closes, never as a
 full-width line.
 
 ### 6.3 Three bars
@@ -270,6 +272,8 @@ These keep the body sequence that gives each pattern its meaning, and drop the g
 | **Evening star (24/7), evening doji star (24/7)** | The mirrors. |
 
 The textbook forms need an opening gap, and on the repo's recorded Binance 1h BTC and ETH data they fired zero times.
+The detail window gives the textbook form as a fact, for example "Textbook form: the star gaps below the first
+body." It does not explain the design choice.
 
 ### 6.6 Price-action patterns (Western, not classical)
 
@@ -336,14 +340,14 @@ or this spec, it is listed here:
   outline (at least 3:1).
 - **Text:** a one-line plain explanation.
 - **Arrows:** a trend arrow into the pattern (from the §5.3 rule) and, once enough later bars have closed, an arrow
-  showing what price did after the pattern. That arrow is labelled "what happened next", not a forecast.
+  showing what price did after the pattern, labelled "what happened next".
 
 **Click.** A detail window (a Tk `Toplevel`) shows:
 - the name, the bars it used, and the bar times;
-- the direction and type tags, marked "textbook meaning, not measured";
-- the rule used, including "24/7 variant" or "non-canonical" where it applies, and the venue: "Binance spot, closed bars";
-- a reference link to the primary source, with its market and metric in words, and **no number** (§10);
-- the reliability line (§10.2).
+- the direction, type and family tags;
+- the textbook definition, plus a "Textbook form: …" note where the textbook form differs from what is drawn;
+- the trend into the pattern, and what happened next once enough bars have closed;
+- the reference: the source's name and link, with **no number** (§10).
 
 **Keyboard.** With the chart focused, ← and → step between labels, Enter opens the detail, and Esc closes it.
 
@@ -362,6 +366,16 @@ or this spec, it is listed here:
   whose output is the blue and orange level lines.
 - **Placement:** the module stays out of `app/strategies/`, so it carries no strategy meaning.
 
+### 7.1 Displayed text (owner, 2026-10-13)
+
+Everything the app shows states facts about the coin, or the textbook definition of what is on screen. It never names:
+- this spec or any of its sections;
+- the data provider (Binance or KuCoin), because the user's trading exchange may be different;
+- a design decision or caveat about it, such as "not measured", "not a forecast", "detected on …", "24/7 variant"
+  or "published statistics are not shown".
+
+A test checks every pattern's text, the hover, the detail window and the pop-out.
+
 ## 8. Chart settings (pop-out)
 
 Users want different things on the chart. One user may not care about doji stars; another may want only bullish
@@ -378,8 +392,8 @@ patterns, or no position lines at all. So every overlay the chart can draw gets 
 - **Buttons:** each tab has **All on** and **All off**. The window also has **Reset to defaults**, which restores
   §8.5.
 - **Defaults:** every existing overlay is on, so the chart looks exactly as it does today until the user changes
-  something. Every pattern starts ticked except the indecision and no-direction ones (§8.3), and the price-action group
-  starts off (§6.6).
+  something. For patterns, the No direction, Continuation and Indecision filters start off, and every pattern box
+  starts ticked except the indecision and no-direction ones (§8.3).
 
 The pop-out has three tabs: Overlays, Candlestick patterns and Appearance.
 
@@ -430,9 +444,18 @@ So unticking one filter hides every pattern in it, whatever their own checkboxes
 **Starting ticks** (owner, 2026-10-13, §12.2). Every indecision pattern and every no-direction pattern starts
 unticked. They are doji, four-price doji, long-legged doji, dragonfly doji, gravestone doji, both spinning tops, high
 wave and inside bar. Every no-direction pattern is also an indecision pattern. Every other pattern starts ticked,
-three white soldiers and three black crows included. No pattern is exempt from the toggles. The tab says "Indecision
-patterns start unticked", so a user looking for dojis knows to tick them. These are the pattern boxes, not the filters:
-the Indecision and No direction filters start on, so ticking Doji alone shows dojis.
+three white soldiers and three black crows included. No pattern is exempt from the toggles. A note such as "Indecision
+patterns start unticked" is not shown on screen (§7.1).
+
+**Starting filters** (owner, 2026-10-13, §12.2):
+
+| Filter group | On | Off |
+|---|---|---|
+| Direction | Bullish, Bearish | No direction |
+| Type | Reversal | Continuation, Indecision |
+| Family | Classical, Price action | none |
+
+To show dojis, a user ticks Doji, the No direction filter and the Indecision filter.
 
 ### 8.4 Appearance tab
 
@@ -454,9 +477,9 @@ All of these go in one `gui_settings` key, `chart`. Its defaults are:
   "patterns": {
     "enabled": true,
     "filters": {
-      "bullish": true, "bearish": true, "none": true,
-      "reversal": true, "continuation": true, "indecision": true,
-      "classical": true, "price_action": false
+      "bullish": true, "bearish": true, "none": false,
+      "reversal": true, "continuation": false, "indecision": false,
+      "classical": true, "price_action": true
     },
     "items": {"hammer": true, "three_white_soldiers": true, "doji": false, "...": "..."},
     "max_labels": 12,
@@ -515,18 +538,18 @@ No percentage from a book, website or blog appears on a label, a hover or the de
 A bare percentage beside a pattern reads as a probability whatever the caveat says, and has no comparator and no n.
 Published figures can also point the wrong way (§10.3).
 
-### 10.2 The reliability line in the detail window
+### 10.2 No reliability line on screen
 
-It shows one of two things:
-- **A verdict line from a registered FDS-SIG-001 round,** in that spec's §13 form: the score against its comparator,
-  n, the family F, the round and window, the venue and timeframe, and PASS (provisional), CONFIRMED, FAIL (with its bound
-  and smallest detectable effect) or NOT ASSESSABLE.
-- **Otherwise:** "Not measured on this data."
+The detail window shows no reliability line (owner, 2026-10-13, §7.1). An earlier draft showed "Not measured on this
+data." there. If a registered FDS-SIG-001 round ever gives a verdict for a pattern, how to show it is a new owner
+decision. A verdict would use that spec's §13 form: the score against its comparator, n, the family F, the round and
+window, the venue and timeframe, and PASS (provisional), CONFIRMED, FAIL (with its bound and smallest detectable effect)
+or NOT ASSESSABLE.
 
-It is never a hit rate computed on the bars the chart has shown. FDS-SIG-001 §11 treats such a re-run as examined data
+A reliability figure is never a hit rate computed on the bars the chart has shown. FDS-SIG-001 §11 treats such a re-run as examined data
 with no verdict.
 
-**Expect "Not measured" almost everywhere.**
+**A verdict would be rare anyway.**
 - **The 1,000-call minimum:** a single pattern needs years of 1h data to reach it. A relaxed Piercing line needs about
   6 years; three white soldiers about 57–86 years.
 - **The audit's coverage:** only 1h and 4h, and only the 10 largest Binance coins. The chart offers 11 timeframes and
@@ -611,6 +634,11 @@ Phase 2 needs:
    item 10.
 10. **Every indecision and every no-direction pattern starts unticked** (§8.3).
 11. **The toolbar button is a cog only,** with no words, at the far right of the chart toolbar after "Last:" (§8.1).
+12. **Starting filters:** Bullish, Bearish, Reversal, Classical and Price action on; No direction, Continuation and
+    Indecision off (§8.3, §8.5).
+13. **Displayed text is facts and textbook definitions only** (§7.1). No spec or section names, no data provider, no
+    design commentary. The detail window drops the "textbook meaning, not measured" note, the venue line, the
+    "published statistics" note and the reliability line (§10.2).
 
 ### 12.3 Defaults this spec sets, to confirm before phase 1
 
@@ -624,8 +652,8 @@ Phase 2 needs:
 5. **One label per candle,** a default cap of 12 that the user can change from 1 to 30, and the precedence order
    (§5.4, §8.3).
 6. **Strict thresholds** for three white soldiers and three black crows (§6.3).
-7. **Price-action patterns in their own group,** shown only where no classical pattern matched, with that group **off
-   by default** (§6.6, §8.5).
+7. **Price-action patterns in their own group,** shown only where no classical pattern matched (§6.6). The group
+   started off by default; it is now on (§12.2 item 12).
 8. **The Chart settings design (§8):**
    - three tabs, and global scope;
    - the "all filters must be on" visibility rule;
@@ -650,7 +678,7 @@ Phase 2 needs:
    - no §6.7 pattern has a rule.
 3. **Data source (test).** Detection reads Binance closed bars through `market_data` (mocked; no network). A detection
    with no matching chart candle is listed but not drawn. A coin with no Binance market, or one recorded not trading,
-   gets the "no Binance market" note.
+   gets the "not available for this coin" note.
 4. **Off the Tk thread.** Fetching and detection never run on the Tk thread (test with a fake that asserts the thread).
 5. **Labels (tests):**
    - placement by open timestamp, surviving a redraw and a one-bar shift;
@@ -664,7 +692,8 @@ Phase 2 needs:
    - **Defaults** reproduce today's chart: the same artists as before this change.
    - **Patterns:** the §8.3 visibility rule holds, including the two worked examples ("only bullish" and "no doji
      stars"). The master toggle and every filter work. Three white soldiers and three black crows can be hidden. The
-     indecision and no-direction patterns, and only those, start unticked. "Max labels" and
+     indecision and no-direction patterns, and only those, start unticked, and the filters start as in §8.3.
+     "Max labels" and
      "Show what happened next" take effect.
    - **Appearance:** the palette and candle style take effect.
    - **Applying:** a change applies to every open chart at once, without a restart.
@@ -675,8 +704,9 @@ Phase 2 needs:
    - `blue_vermilion` meets both §9 criteria under all three views;
    - `default` is unchanged and meets 3:1 for typical vision;
    - `hollow_up` draws up bodies with no fill.
-8. **No published numbers (test).** No pattern description, label or detail text contains a percentage or a published
-   hit rate.
+8. **No published numbers, and facts only (test).** No pattern description, label or detail text contains a
+   percentage or a published hit rate. No pattern text, hover, detail window or pop-out text names this spec, a
+   section, the data provider or a design caveat (§7.1).
 9. **Nothing else changes.**
    - No import of `candlestick_patterns` from `strategies`, `signal_engine`, `pt_trader`, `pt_thinker` or the trainer
      (test).
