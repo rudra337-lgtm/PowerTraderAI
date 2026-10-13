@@ -71,9 +71,10 @@ CANDLE_STYLES: Dict[str, str] = {"filled": "Filled", "hollow_up": "Hollow up"}
 
 
 def default_on(pattern: PatternDef) -> bool:
-    """Owner decision 2026-10-13 (FDS-CHART-001 section 12.2): indecision and
-    no-direction patterns start unticked; every other pattern starts ticked."""
-    return pattern.kind != "indecision" and pattern.direction != "none"
+    """Owner decisions 2026-10-13 (FDS-CHART-001 section 12.2): a pattern starts
+    unticked when it belongs to a filter that starts off (no direction, continuation,
+    indecision); every other pattern starts ticked."""
+    return not set(pattern.tags) & set(FILTERS_OFF_BY_DEFAULT)
 
 
 def defaults() -> Dict[str, Any]:

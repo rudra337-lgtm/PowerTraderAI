@@ -393,7 +393,7 @@ patterns, or no position lines at all. So every overlay the chart can draw gets 
   §8.5.
 - **Defaults:** every existing overlay is on, so the chart looks exactly as it does today until the user changes
   something. For patterns, the No direction, Continuation and Indecision filters start off, and every pattern box
-  starts ticked except the indecision and no-direction ones (§8.3).
+  starts ticked except the no-direction, continuation and indecision ones (§8.3).
 
 The pop-out has three tabs: Overlays, Candlestick patterns and Appearance.
 
@@ -441,10 +441,13 @@ So unticking one filter hides every pattern in it, whatever their own checkboxes
 - **No doji stars:** untick Morning doji star (24/7) and Evening doji star (24/7). To drop every doji-type pattern,
   untick Indecision.
 
-**Starting ticks** (owner, 2026-10-13, §12.2). Every indecision pattern and every no-direction pattern starts
-unticked. They are doji, four-price doji, long-legged doji, dragonfly doji, gravestone doji, both spinning tops, high
-wave and inside bar. Every no-direction pattern is also an indecision pattern. Every other pattern starts ticked,
-three white soldiers and three black crows included. No pattern is exempt from the toggles. A note such as "Indecision
+**Starting ticks** (owner, 2026-10-13, §12.2). A pattern starts unticked when it belongs to a filter that starts off
+(No direction, Continuation or Indecision, below).
+- **Indecision:** doji, four-price doji, long-legged doji, dragonfly doji, gravestone doji, both spinning tops, high
+  wave and inside bar. Every no-direction pattern is also an indecision pattern.
+- **Continuation:** rising three methods, falling three methods and mat hold.
+
+Every other pattern starts ticked, three white soldiers and three black crows included. No pattern is exempt from the toggles. A note such as "Indecision
 patterns start unticked" is not shown on screen (§7.1).
 
 **Starting filters** (owner, 2026-10-13, §12.2):
@@ -490,11 +493,12 @@ All of these go in one `gui_settings` key, `chart`. Its defaults are:
 }
 ```
 
-`items` holds one entry per pattern: `true`, except `false` for the indecision and no-direction patterns (§8.3).
+`items` holds one entry per pattern: `true`, except `false` for the no-direction, continuation and indecision
+patterns (§8.3).
 
 - **Missing keys** take their defaults, so an older settings file still works.
 - **Unknown keys** are kept but ignored.
-- **A pattern added later** takes its starting tick (§8.3): on, unless it is an indecision or no-direction pattern.
+- **A pattern added later** takes its starting tick (§8.3): on, unless it belongs to a filter that starts off.
 - **Pattern ids** are stable snake_case names from §6, for example `morning_doji_star_247`.
 
 `CandleChart` must read the whole `chart` key, and a test checks every toggle. The repo already has one saved setting
@@ -632,7 +636,8 @@ Phase 2 needs:
 9. **Three white soldiers and three black crows are no longer always visible.** They start ticked, and the user can
    hide them with their own box, the master toggle or any filter they belong to (§6.3, §8.3). This answers §12.3
    item 10.
-10. **Every indecision and every no-direction pattern starts unticked** (§8.3).
+10. **Every indecision, continuation and no-direction pattern starts unticked** (§8.3). Continuation was added
+    the same day, so a pattern's own box agrees with its filter.
 11. **The toolbar button is a cog only,** with no words, at the far right of the chart toolbar after "Last:" (§8.1).
 12. **Starting filters:** Bullish, Bearish, Reversal, Classical and Price action on; No direction, Continuation and
     Indecision off (§8.3, §8.5).
@@ -692,7 +697,8 @@ Phase 2 needs:
    - **Defaults** reproduce today's chart: the same artists as before this change.
    - **Patterns:** the §8.3 visibility rule holds, including the two worked examples ("only bullish" and "no doji
      stars"). The master toggle and every filter work. Three white soldiers and three black crows can be hidden. The
-     indecision and no-direction patterns, and only those, start unticked, and the filters start as in §8.3.
+     no-direction, continuation and indecision patterns, and only those, start unticked, and the filters start as
+     in §8.3.
      "Max labels" and
      "Show what happened next" take effect.
    - **Appearance:** the palette and candle style take effect.

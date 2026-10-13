@@ -30,7 +30,7 @@ T0 = 1_700_000_000 - 1_700_000_000 % HOUR
 # --- settings: normalising and the visibility rule (section 8) ----------------------
 
 
-INDECISION_AND_NO_DIRECTION = {
+STARTS_UNTICKED = {
     "doji",
     "four_price_doji",
     "long_legged_doji",
@@ -40,6 +40,9 @@ INDECISION_AND_NO_DIRECTION = {
     "spinning_top_black",
     "high_wave",
     "inside_bar",
+    "rising_three_methods",
+    "falling_three_methods",
+    "mat_hold",
 }
 
 
@@ -65,19 +68,22 @@ def test_defaults_show_every_existing_overlay_and_the_owners_filters():
     )
 
 
-def test_indecision_and_no_direction_patterns_start_unticked():
-    """Owner decision 2026-10-13: every indecision and every no-direction pattern is
-    off by default; every other pattern, three white soldiers and three black crows
-    included, is on."""
+def test_patterns_in_a_filter_that_starts_off_start_unticked():
+    """Owner decisions 2026-10-13: every no-direction, continuation and indecision
+    pattern is off by default; every other pattern, three white soldiers and three
+    black crows included, is on."""
     items = cs.normalize(None)["patterns"]["items"]
     off = {k for k, v in items.items() if not v}
-    assert off == INDECISION_AND_NO_DIRECTION
+    assert off == STARTS_UNTICKED
     assert off == {
-        p.id for p in cp.PATTERNS if p.kind == "indecision" or p.direction == "none"
+        p.id
+        for p in cp.PATTERNS
+        if p.kind in ("indecision", "continuation") or p.direction == "none"
     }
+    assert {"rising_three_methods", "falling_three_methods", "mat_hold"} <= off
     shown = visible_ids(cs.normalize(None))
     assert {"three_white_soldiers", "three_black_crows"} <= shown
-    assert not shown & INDECISION_AND_NO_DIRECTION
+    assert not shown & STARTS_UNTICKED
     ticked = {"items": {"doji": True}}
     assert "doji" not in visible_ids(cs.normalize({"patterns": ticked}))
     ticked["filters"] = {"none": True, "indecision": True}
@@ -576,7 +582,7 @@ def test_the_label_cap_hides_the_rest_and_says_so(make_chart):
         rows.append((o, 100.9, 99.5, c))
     bars = [cp.Bar(T0 + k * HOUR, *r) for k, r in enumerate(rows)]
     ticked = {  # off by default
-        "items": {i: True for i in INDECISION_AND_NO_DIRECTION},
+        "items": {i: True for i in STARTS_UNTICKED},
         "filters": {"none": True, "indecision": True},
         "max_labels": 2,
     }
