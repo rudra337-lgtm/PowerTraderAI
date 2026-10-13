@@ -145,9 +145,8 @@ the bars its averages need (13 for the trend rule, 10 for R(10) and B(10)).
 - **Staggering:** labels on the same side within 10 candles of each other are raised one level each (up to four
   levels, 16 pt apart), so they do not sit on top of each other.
 - **Cap:** at most 12 labels per chart by default ("Max labels per chart", §8.3), in this priority:
-  1. the pinned Three White Soldiers and Three Black Crows (§6.3);
-  2. then by bar count;
-  3. then by recency.
+  1. by bar count;
+  2. then by recency.
 
   A note says how many detections were hidden.
 
@@ -209,15 +208,17 @@ full-width line.
 | Morning doji star (24/7) | bullish | reversal | downtrend | §6.5 |
 | Evening star (24/7) | bearish | reversal | uptrend | §6.5 |
 | Evening doji star (24/7) | bearish | reversal | uptrend | §6.5 |
-| **Three white soldiers** (pinned) | bullish | reversal | downtrend | below |
-| **Three black crows** (pinned) | bearish | reversal | uptrend | below |
+| **Three white soldiers** | bullish | reversal | downtrend | below |
+| **Three black crows** | bearish | reversal | uptrend | below |
 | Three outside up | bullish | reversal | downtrend | CDL3OUTSIDE |
 | Three outside down | bearish | reversal | uptrend | CDL3OUTSIDE |
 | Three inside up | bullish | reversal | downtrend | CDL3INSIDE |
 | Three inside down | bearish | reversal | uptrend | CDL3INSIDE |
 
-**Three white soldiers and three black crows are always visible** (owner, §12). Their thresholds are fixed here,
-because no toggle can hide them. Three white soldiers needs a downtrend before bar 1, and three bars that are each:
+**Three white soldiers and three black crows** are on by default, and the user can hide them like any other pattern
+(owner, 2026-10-13, §12.2). Earlier drafts made them always visible, which is why their thresholds are fixed here and
+strict.
+Three white soldiers needs a downtrend before bar 1, and three bars that are each:
 - white, with a long body (> B(10));
 - closing higher than the previous bar;
 - opening within or at the edge of the previous bar's body, inclusive (bars 2 and 3);
@@ -225,9 +226,9 @@ because no toggle can hide them. Three white soldiers needs a downtrend before b
 
 Three black crows is the mirror, with a lower shadow of at most 0.25 × body.
 
-On the recorded 1h fixtures, the rule as pinned fired once in about 3,000 bars: 0 times in 1,513 BTC bars and once in
-1,512 ETH bars. A looser rule without the body, shadow and trend limits fired 14–17 times per 120 bars, as overlapping
-runs. That is why the thresholds are pinned: an always-visible label must be rare.
+On the recorded 1h fixtures, this rule fired once in about 3,000 bars: 0 times in 1,513 BTC bars and once in 1,512
+ETH bars. A looser rule without the body, shadow and trend limits fired 14–17 times per 120 bars, as overlapping runs.
+That is why the thresholds stay strict: a default-on label should be rare.
 
 The draft also tagged both "continuation". In theory both are reversal patterns, so that tag is dropped.
 
@@ -369,14 +370,16 @@ patterns, or no position lines at all. So every overlay the chart can draw gets 
 ### 8.1 Where it lives and how it behaves
 
 - **Opening it:** a **Chart settings…** button in the Settings window opens a non-modal pop-out (a Tk `Toplevel`). The
-  same pop-out also opens from a small ⚙ button on each chart's toolbar. Only one is open at a time.
+  same pop-out also opens from a cog-only ⚙ button, with no words, at the far right of each chart's toolbar, after
+  "Last:". Its tooltip says "Chart settings". Only one is open at a time.
 - **Applying changes:** a change applies at once to every open chart, with an immediate redraw and no restart. It is
   saved to `gui_settings`.
 - **Scope:** settings are global, the same for every coin and timeframe.
 - **Buttons:** each tab has **All on** and **All off**. The window also has **Reset to defaults**, which restores
   §8.5.
 - **Defaults:** every existing overlay is on, so the chart looks exactly as it does today until the user changes
-  something.
+  something. Every pattern starts ticked except the indecision and no-direction ones (§8.3), and the price-action group
+  starts off (§6.6).
 
 The pop-out has three tabs: Overlays, Candlestick patterns and Appearance.
 
@@ -424,9 +427,12 @@ So unticking one filter hides every pattern in it, whatever their own checkboxes
 - **No doji stars:** untick Morning doji star (24/7) and Evening doji star (24/7). To drop every doji-type pattern,
   untick Indecision.
 
-**The two pinned patterns.** Three white soldiers and three black crows are shown ticked and greyed out, with the note
-"always visible (owner decision)". They ignore the master toggle, the filters and their own checkbox (§6.3). §12.3 item 10 asks
-whether to keep that exemption now that users can tailor everything else.
+**Starting ticks** (owner, 2026-10-13, §12.2). Every indecision pattern and every no-direction pattern starts
+unticked. They are doji, four-price doji, long-legged doji, dragonfly doji, gravestone doji, both spinning tops, high
+wave and inside bar. Every no-direction pattern is also an indecision pattern. Every other pattern starts ticked,
+three white soldiers and three black crows included. No pattern is exempt from the toggles. The tab says "Indecision
+patterns start unticked", so a user looking for dojis knows to tick them. These are the pattern boxes, not the filters:
+the Indecision and No direction filters start on, so ticking Doji alone shows dojis.
 
 ### 8.4 Appearance tab
 
@@ -452,7 +458,7 @@ All of these go in one `gui_settings` key, `chart`. Its defaults are:
       "reversal": true, "continuation": true, "indecision": true,
       "classical": true, "price_action": false
     },
-    "items": {"hammer": true, "...": true},
+    "items": {"hammer": true, "three_white_soldiers": true, "doji": false, "...": "..."},
     "max_labels": 12,
     "next_arrows": true
   },
@@ -461,9 +467,11 @@ All of these go in one `gui_settings` key, `chart`. Its defaults are:
 }
 ```
 
+`items` holds one entry per pattern: `true`, except `false` for the indecision and no-direction patterns (§8.3).
+
 - **Missing keys** take their defaults, so an older settings file still works.
 - **Unknown keys** are kept but ignored.
-- **A pattern added later** defaults to on.
+- **A pattern added later** takes its starting tick (§8.3): on, unless it is an indecision or no-direction pattern.
 - **Pattern ids** are stable snake_case names from §6, for example `morning_doji_star_247`.
 
 `CandleChart` must read the whole `chart` key, and a test checks every toggle. The repo already has one saved setting
@@ -589,7 +597,7 @@ Phase 2 needs:
    - **Kept as named 24/7 variants:** Morning and Evening star, Piercing line and Dark cloud cover.
 4. **No published percentages on screen** (§10.1).
 5. **The forward audit note is kept,** reframed (§10.4).
-6. **Three white soldiers and three black crows are always visible** (§6.3).
+6. ~~Three white soldiers and three black crows are always visible~~ (§6.3). Replaced by item 9.
 7. **In-neck is dropped.**
 
 ### 12.2 Added on 2026-10-13
@@ -598,6 +606,11 @@ Phase 2 needs:
    (§8). That covers each existing line and the markers, the Neural readout, every candlestick pattern, and the pattern
    groups. The reason: whatever a user wants (no doji stars, only bullish patterns, no position lines), the chart must
    support it.
+9. **Three white soldiers and three black crows are no longer always visible.** They start ticked, and the user can
+   hide them with their own box, the master toggle or any filter they belong to (§6.3, §8.3). This answers §12.3
+   item 10.
+10. **Every indecision and every no-direction pattern starts unticked** (§8.3).
+11. **The toolbar button is a cog only,** with no words, at the far right of the chart toolbar after "Last:" (§8.1).
 
 ### 12.3 Defaults this spec sets, to confirm before phase 1
 
@@ -610,7 +623,7 @@ Phase 2 needs:
 4. **The trend rule:** SMA₁₀ with a 3-bar slope (§5.3).
 5. **One label per candle,** a default cap of 12 that the user can change from 1 to 30, and the precedence order
    (§5.4, §8.3).
-6. **Pinned thresholds** for three white soldiers and three black crows (§6.3).
+6. **Strict thresholds** for three white soldiers and three black crows (§6.3).
 7. **Price-action patterns in their own group,** shown only where no classical pattern matched, with that group **off
    by default** (§6.6, §8.5).
 8. **The Chart settings design (§8):**
@@ -619,9 +632,8 @@ Phase 2 needs:
    - every existing overlay on by default;
    - one `chart` key in `gui_settings`.
 9. **The `blue_vermilion` palette and the `hollow_up` option** (§9).
-10. **The pinned exemption.** Should three white soldiers and three black crows stay always visible, ignoring every
-    toggle (§12.1 item 6)? Or, now that users can tailor everything else (§12.2), should they become default-on
-    patterns the user can hide?
+10. ~~The pinned exemption.~~ **Answered 2026-10-13** (§12.2 item 9): three white soldiers and three black crows are
+    default-on patterns the user can hide.
 
 ## 13. Acceptance criteria (phase 1)
 
@@ -634,7 +646,7 @@ Phase 2 needs:
    - the forming bar never being used.
 2. **The recorded fixtures (test).** On `app/tests/fixtures/BTCUSDT_1h.csv` and `ETHUSDT_1h.csv`:
    - each rule's count is reported in the test output, for the run log;
-   - the pinned three white soldiers and three black crows reproduce the §6.3 counts (BTC 0, ETH 1);
+   - three white soldiers and three black crows reproduce the §6.3 counts (BTC 0, ETH 1);
    - no §6.7 pattern has a rule.
 3. **Data source (test).** Detection reads Binance closed bars through `market_data` (mocked; no network). A detection
    with no matching chart candle is listed but not drawn. A coin with no Binance market, or one recorded not trading,
@@ -645,17 +657,19 @@ Phase 2 needs:
    - merging, precedence, the "+n" badge, and the cap of 12 with the hidden-count note;
    - glyphs and `DARK_FG` text.
 6. **Chart settings (tests):**
-   - The pop-out opens from the Settings window and from the chart toolbar, and only one is open at a time.
+   - The pop-out opens from the Settings window and from the chart toolbar, and only one is open at a time. The
+     toolbar button shows only the cog and sits at the far right, after "Last:".
    - **Overlays:** each §8.2 toggle hides exactly its own element (its line and label, the markers or the readout) and
      nothing else, checked against the drawn artists of a rendered test chart.
    - **Defaults** reproduce today's chart: the same artists as before this change.
    - **Patterns:** the §8.3 visibility rule holds, including the two worked examples ("only bullish" and "no doji
-     stars"). The master toggle and every filter work, and the pinned patterns cannot be hidden. "Max labels" and
+     stars"). The master toggle and every filter work. Three white soldiers and three black crows can be hidden. The
+     indecision and no-direction patterns, and only those, start unticked. "Max labels" and
      "Show what happened next" take effect.
    - **Appearance:** the palette and candle style take effect.
    - **Applying:** a change applies to every open chart at once, without a restart.
    - **Storage:** the `chart` key round-trips through `gui_settings`. Missing keys take defaults, unknown keys are kept,
-     and a newly added pattern defaults to on.
+     and a newly added pattern takes its starting tick.
    - **Reset to defaults** restores §8.5.
 7. **Colour (test).** Computed in the test:
    - `blue_vermilion` meets both §9 criteria under all three views;

@@ -721,7 +721,7 @@ class ChartSettingsWindow(tk.Toplevel):
             k: tk.BooleanVar(value=pats["filters"][k]) for k in cs.FILTERS
         }
         self.item_vars = {
-            p.id: tk.BooleanVar(value=pats["items"].get(p.id, True))
+            p.id: tk.BooleanVar(value=pats["items"].get(p.id, cs.default_on(p)))
             for p in cp.PATTERNS
         }
         self.max_labels_var = tk.IntVar(value=pats["max_labels"])
@@ -805,6 +805,7 @@ class ChartSettingsWindow(tk.Toplevel):
         ttk.Label(
             top,
             text="A pattern shows only when its own box and every filter it belongs to are on. "
+            "Indecision patterns start unticked. "
             "Tags are textbook meaning, not measured behaviour.",
             wraplength=560,
         ).pack(anchor="w", pady=(4, 2))
@@ -837,17 +838,10 @@ class ChartSettingsWindow(tk.Toplevel):
                     continue
                 tags = ", ".join(t.replace("_", " ") for t in p.tags)
                 text = f"{p.glyph} {p.name}   ({tags})"
-                if p.pinned:
-                    text += "   always visible (owner decision)"
                 cb = ttk.Checkbutton(inner, text=text, variable=self.item_vars[p.id])
-                if p.pinned:
-                    self.item_vars[p.id].set(True)
-                    cb.state(["disabled"])
                 cb.pack(anchor="w", padx=(12, 0))
                 self.pattern_checks[p.id] = cb
-        self._all_on_off(
-            outer, [v for k, v in self.item_vars.items() if not cp.BY_ID[k].pinned]
-        )
+        self._all_on_off(outer, list(self.item_vars.values()))
         return outer
 
     def _appearance_tab(self, nb):

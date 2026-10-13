@@ -964,15 +964,18 @@ class CandleChart(ttk.Frame):
         self.patterns_status_label = ttk.Label(top, text="", cursor="hand2")
         self.patterns_status_label.pack(side="left", padx=(12, 0))
 
+        # cog packed first so it sits at the far right, after "Last:"
+        self.chart_settings_button = ttk.Button(
+            top,
+            text="\u2699",
+            width=3,
+            command=lambda: self.event_generate("<<OpenChartSettings>>", when="tail"),
+        )
+        self.chart_settings_button.pack(side="right", padx=(8, 0))
+        ToolTip(self.chart_settings_button, "Chart settings")
+
         self.last_update_label = ttk.Label(top, text="Last: N/A")
         self.last_update_label.pack(side="right")
-
-        ttk.Button(
-            top,
-            text="\u2699 Chart",
-            width=8,
-            command=lambda: self.event_generate("<<OpenChartSettings>>", when="tail"),
-        ).pack(side="right", padx=(0, 8))
 
         # Figure
         # IMPORTANT: keep a stable DPI and resize the figure to the widget's pixel size.

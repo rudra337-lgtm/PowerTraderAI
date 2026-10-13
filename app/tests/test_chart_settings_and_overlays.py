@@ -29,18 +29,47 @@ T0 = 1_700_000_000 - 1_700_000_000 % HOUR
 # --- settings: normalising and the visibility rule (section 8) ----------------------
 
 
+INDECISION_AND_NO_DIRECTION = {
+    "doji",
+    "four_price_doji",
+    "long_legged_doji",
+    "dragonfly_doji",
+    "gravestone_doji",
+    "spinning_top_white",
+    "spinning_top_black",
+    "high_wave",
+    "inside_bar",
+}
+
+
 def test_defaults_show_every_existing_overlay_and_hide_price_action():
     cfg = cs.normalize(None)
     assert all(cfg["overlays"].values()) and len(cfg["overlays"]) == len(cs.OVERLAYS)
     filters = cfg["patterns"]["filters"]
     assert filters["price_action"] is False
     assert all(v for k, v in filters.items() if k != "price_action")
-    assert all(cfg["patterns"]["items"].values())
     assert (cfg["patterns"]["max_labels"], cfg["palette"], cfg["candle_style"]) == (
         12,
         "default",
         "filled",
     )
+
+
+def test_indecision_and_no_direction_patterns_start_unticked():
+    """Owner decision 2026-10-13: every indecision and every no-direction pattern is
+    off by default; every other pattern, three white soldiers and three black crows
+    included, is on."""
+    items = cs.normalize(None)["patterns"]["items"]
+    off = {k for k, v in items.items() if not v}
+    assert off == INDECISION_AND_NO_DIRECTION
+    assert off == {
+        p.id for p in cp.PATTERNS if p.kind == "indecision" or p.direction == "none"
+    }
+    shown = visible_ids(cs.normalize(None))
+    assert {"three_white_soldiers", "three_black_crows"} <= shown
+    assert not shown & INDECISION_AND_NO_DIRECTION
+    ticked = cs.normalize({"patterns": {"items": {"doji": True}}})
+    assert "doji" in visible_ids(ticked)
 
 
 def test_missing_keys_take_defaults_and_unknown_keys_are_kept():
@@ -52,9 +81,9 @@ def test_missing_keys_take_defaults_and_unknown_keys_are_kept():
     cfg = cs.normalize(raw)
     assert cfg["overlays"]["ask"] is False and cfg["overlays"]["bid"] is True
     assert cfg["patterns"]["items"]["hammer"] is False
-    assert (
-        cfg["patterns"]["items"]["doji"] is True
-    )  # not stored: a later pattern defaults on
+    # not stored: a later pattern takes its own default
+    assert cfg["patterns"]["items"]["morning_star_247"] is True
+    assert cfg["patterns"]["items"]["doji"] is False
     assert cfg["future"] == {"x": 1}
 
 
@@ -89,11 +118,11 @@ def test_only_bullish_patterns():
         }
     )
     shown = visible_ids(cfg)
-    assert all(cp.BY_ID[i].direction == "bullish" or cp.BY_ID[i].pinned for i in shown)
+    assert all(cp.BY_ID[i].direction == "bullish" for i in shown)
     assert (
         "hammer" in shown and "bearish_engulfing" not in shown and "doji" not in shown
     )
-    assert "three_black_crows" in shown  # pinned: always visible
+    assert "three_white_soldiers" in shown and "three_black_crows" not in shown
 
 
 def test_no_doji_stars():
@@ -110,7 +139,7 @@ def test_no_doji_stars():
     )
     shown = visible_ids(cfg)
     assert "morning_doji_star_247" not in shown and "evening_doji_star_247" not in shown
-    assert "doji" in shown and "morning_star_247" in shown
+    assert "morning_star_247" in shown and "doji" not in shown  # doji starts off
     no_indecision = visible_ids(
         cs.normalize({"patterns": {"filters": {"indecision": False}}})
     )
@@ -120,13 +149,22 @@ def test_no_doji_stars():
     )
 
 
-def test_the_master_toggle_hides_everything_but_the_pinned_patterns():
-    shown = visible_ids(cs.normalize({"patterns": {"enabled": False}}))
-    assert shown == {"three_white_soldiers", "three_black_crows"}
-    hidden_pinned = cs.normalize(
-        {"patterns": {"items": {"three_white_soldiers": False}}}
-    )
-    assert cs.pattern_visible(hidden_pinned, cp.BY_ID["three_white_soldiers"])
+def test_the_master_toggle_hides_every_pattern():
+    assert visible_ids(cs.normalize({"patterns": {"enabled": False}})) == set()
+
+
+@pytest.mark.parametrize(
+    "patterns",
+    [
+        {"items": {"three_white_soldiers": False, "three_black_crows": False}},
+        {"filters": {"reversal": False}},
+        {"filters": {"classical": False}},
+    ],
+)
+def test_three_soldiers_and_crows_can_be_hidden(patterns):
+    """Owner decision 2026-10-13: no longer always visible."""
+    shown = visible_ids(cs.normalize({"patterns": patterns}))
+    assert not {"three_white_soldiers", "three_black_crows"} & shown
 
 
 # --- colour (section 9) --------------------------------------------------------------
@@ -525,8 +563,11 @@ def test_the_label_cap_hides_the_rest_and_says_so(make_chart):
         c = 100.05 if k % 3 else 100.4
         rows.append((o, 100.9, 99.5, c))
     bars = [cp.Bar(T0 + k * HOUR, *r) for k, r in enumerate(rows)]
+    ticked = {i: True for i in INDECISION_AND_NO_DIRECTION}  # off by default
     chart = make_chart(
-        as_candles(bars), chart_cfg={"patterns": {"max_labels": 2}}, bars=bars
+        as_candles(bars),
+        chart_cfg={"patterns": {"max_labels": 2, "items": ticked}},
+        bars=bars,
     )
     refresh(chart)
     chart.pattern_layer.wait()
@@ -603,14 +644,27 @@ def test_the_pop_out_applies_each_change_at_once_and_keeps_unknown_keys(tk_root)
     assert seen[-1]["patterns"]["items"]["hammer"] is False
     win.palette_var.set("blue_vermilion")
     assert seen[-1]["palette"] == "blue_vermilion"
-    assert win.pattern_checks["three_white_soldiers"].instate(["disabled"])
+    assert not win.pattern_checks["three_white_soldiers"].instate(["disabled"])
+    win.item_vars["three_white_soldiers"].set(False)
+    assert seen[-1]["patterns"]["items"]["three_white_soldiers"] is False
+    assert win.item_vars["doji"].get() is False  # indecision starts unticked
     win.reset()
     reset = seen[-1]
     assert (
         reset["overlays"] == cs.defaults()["overlays"] and reset["palette"] == "default"
     )
+    assert reset["patterns"]["items"] == cs.defaults()["patterns"]["items"]
     assert reset["future"] == 1
     win.destroy()
+
+
+def test_the_toolbar_cog_is_an_icon_at_the_far_right(make_chart):
+    """Owner request 2026-10-13: cog only, no words, after "Last:"."""
+    chart = make_chart(as_candles(down_then_engulfing()))
+    button = chart.chart_settings_button
+    assert str(button.cget("text")) == "⚙"
+    right = [w for w in button.master.pack_slaves() if w.pack_info()["side"] == "right"]
+    assert right[:2] == [button, chart.last_update_label]  # first packed = rightmost
 
 
 def test_the_pop_out_opens_from_settings_and_the_toolbar_once(monkeypatch):

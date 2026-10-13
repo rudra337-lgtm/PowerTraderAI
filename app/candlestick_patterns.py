@@ -29,7 +29,7 @@ TREND_SMA = 10
 TREND_SLOPE = 3
 TREND_BARS = TREND_SMA + TREND_SLOPE  # bars of history the trend rule needs
 AVG_BARS = 10  # bars of history the averages need
-# pinned three white soldiers / three black crows (section 6.3)
+# three white soldiers / three black crows (section 6.3)
 SOLDIER_SHADOW = 0.25  # closing-side shadow at most 0.25 x body
 
 
@@ -154,7 +154,6 @@ class PatternDef:
     reference: str
     url: str = ""
     note: str = ""  # "24/7 variant", "non-canonical", source disagreement, ...
-    pinned: bool = False
     rule: Optional[Callable] = field(default=None, compare=False, repr=False)
 
     @property
@@ -837,9 +836,8 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "reversal",
         "down",
         "After a fall: three long white bars, each closing higher and opening inside the previous body.",
-        TALIB + " (CDL3WHITESOLDIERS); thresholds pinned in FDS-CHART-001 section 6.3",
+        TALIB + " (CDL3WHITESOLDIERS); thresholds set in FDS-CHART-001 section 6.3",
         rule=_soldiers,
-        pinned=True,
     ),
     _p(
         "three_black_crows",
@@ -849,9 +847,8 @@ PATTERNS: Tuple[PatternDef, ...] = (
         "reversal",
         "up",
         "After a rise: three long black bars, each closing lower and opening inside the previous body.",
-        TALIB + " (CDL3BLACKCROWS); thresholds pinned in FDS-CHART-001 section 6.3",
+        TALIB + " (CDL3BLACKCROWS); thresholds set in FDS-CHART-001 section 6.3",
         rule=_crows,
-        pinned=True,
     ),
     _p(
         "three_outside_up",
@@ -1209,7 +1206,7 @@ def layout(
     """One label per candle: merge runs, keep the visible patterns, pick a winner per
     last candle (most bars, then classical, then library order; price action only
     where no classical pattern ends on that candle), then cap the label count
-    (pinned first, then by bar count, then the most recent)."""
+    (by bar count, then the most recent)."""
     kept = [d for d in merge_runs(detections) if visible(BY_ID[d.pattern_id])]
     by_candle: Dict[int, List[Detection]] = {}
     for d in kept:
@@ -1223,11 +1220,7 @@ def layout(
 
     def priority(lb: Label):
         d = lb.detection
-        return (
-            not lb.pattern.pinned,
-            -(d.last_index - d.first_index + 1),
-            -d.last_index,
-        )
+        return (-(d.last_index - d.first_index + 1), -d.last_index)
 
     labels.sort(key=priority)
     cap = max(1, int(max_labels))

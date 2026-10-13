@@ -551,7 +551,7 @@ def test_price_action_shows_where_no_classical_pattern_matched():
     assert [lb.detection.pattern_id for lb in lay.labels] == ["pin_bar_bullish"]
 
 
-def test_the_cap_keeps_the_pinned_patterns_then_longer_then_recent():
+def test_the_cap_keeps_longer_patterns_then_recent():
     dets = [det("doji", k, k) for k in range(0, 30, 2)] + [
         det("three_white_soldiers", 0, 2)
     ]
@@ -588,7 +588,9 @@ def load_fixture(name):
 
 
 @pytest.mark.parametrize("name,soldiers", [("BTCUSDT_1h", 0), ("ETHUSDT_1h", 1)])
-def test_the_pinned_patterns_are_rare_on_recorded_binance_data(name, soldiers, capsys):
+def test_three_soldiers_and_crows_are_rare_on_recorded_binance_data(
+    name, soldiers, capsys
+):
     bars = load_fixture(name)
     used, dets = cp.detect(bars, HOUR)
     counts = {}

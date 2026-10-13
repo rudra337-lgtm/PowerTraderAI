@@ -5,7 +5,7 @@ which candlestick patterns are shown, and the palette. Pure: no Tk.
 The settings live under one ``gui_settings`` key, ``chart``. ``normalize`` turns
 whatever is stored there into a complete settings dict: missing keys take their
 defaults (an older settings file still works), unknown keys are kept but ignored, and
-a pattern added later defaults to on.
+a pattern added later takes its own default (``default_on``).
 """
 
 from __future__ import annotations
@@ -68,13 +68,19 @@ PALETTES: Dict[str, Dict[str, str]] = {
 CANDLE_STYLES: Dict[str, str] = {"filled": "Filled", "hollow_up": "Hollow up"}
 
 
+def default_on(pattern: PatternDef) -> bool:
+    """Owner decision 2026-10-13 (FDS-CHART-001 section 12.2): indecision and
+    no-direction patterns start unticked; every other pattern starts ticked."""
+    return pattern.kind != "indecision" and pattern.direction != "none"
+
+
 def defaults() -> Dict[str, Any]:
     return {
         "overlays": {key: True for key, _, _ in OVERLAYS},
         "patterns": {
             "enabled": True,
             "filters": {key: key != "price_action" for key in FILTERS},
-            "items": {p.id: True for p in PATTERNS},
+            "items": {p.id: default_on(p) for p in PATTERNS},
             "max_labels": 12,
             "next_arrows": True,
         },
@@ -129,12 +135,9 @@ def overlay_on(cfg: Dict[str, Any], key: str) -> bool:
 
 def pattern_visible(cfg: Dict[str, Any], pattern: PatternDef) -> bool:
     """FDS-CHART-001 section 8.3: shown when the master toggle, the pattern's own
-    checkbox and every filter it belongs to are on. The pinned patterns are always
-    shown."""
-    if pattern.pinned:
-        return True
+    checkbox and every filter it belongs to are on."""
     pats = cfg["patterns"]
-    if not pats["enabled"] or not pats["items"].get(pattern.id, True):
+    if not pats["enabled"] or not pats["items"].get(pattern.id, default_on(pattern)):
         return False
     return all(pats["filters"].get(tag, True) for tag in pattern.tags)
 
