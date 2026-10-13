@@ -17,6 +17,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass
 from decimal import Decimal
 from io import BytesIO
@@ -900,6 +901,39 @@ class CandleFetcher:
 # Chart widget
 # -----------------------------
 
+# Chart margins follow the text actually drawn (title, axis labels, tick labels, price
+# tags). Fixed fractions left a wide, short chart a fifth of its height empty above and
+# below and an eighth of its width at each side.
+CHART_PAD = 0.4  # space round the chart's outer text, as a fraction of the font size
+TAG_FONT_PT = 8  # right-hand price tags (ASK, BID, AVG, DCA, SELL)
+TAG_BOX_PAD = 0.18  # their box padding, as a fraction of the font size
+
+
+def _fit_axes(fig: Figure, right: float = 1.0) -> None:
+    """Fit the plot and its axis text into the figure, leaving the share of the width to
+    the right of ``right`` free."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # too small to fit: keep the last layout
+            fig.tight_layout(pad=CHART_PAD, rect=(0.0, 0.0, max(0.5, right), 1.0))
+    except Exception:
+        pass
+
+
+def _tag_strip(fig: Figure, tags: List[Any]) -> float:
+    """Share of the figure width the price tags need: they start 1% of the plot width
+    past its right edge (x = 1.01) and sit in a rounded box."""
+    if not tags:
+        return 0.0
+    try:
+        renderer = fig.canvas.get_renderer()
+        widest = max(t.get_window_extent(renderer).width for t in tags)
+        fig_px = float(fig.bbox.width)
+        box_px = 2 * TAG_BOX_PAD * TAG_FONT_PT * fig.dpi / 72.0
+        return min(0.4, (widest + box_px + 0.01 * fig_px + 4) / fig_px)
+    except Exception:
+        return 0.0
+
 
 class CandleChart(ttk.Frame):
     def __init__(
@@ -983,15 +1017,13 @@ class CandleChart(ttk.Frame):
         # exact right-side blank/covered region you're seeing.
         self.fig = Figure(figsize=(6.5, 3.5), dpi=100)
         self.fig.patch.set_facecolor(DARK_BG)
-
-        # Reserve bottom space so date+time x tick labels are always visible
-        # Also reserve right space so the price labels (Bid/Ask/DCA/Sell) can sit outside the plot.
-        # Also reserve a bit of top space so the title never gets clipped.
-        self.fig.subplots_adjust(bottom=0.20, right=0.87, top=0.8)
+        # margins: fit_layout(), after every refresh and resize
 
         self.ax = self.fig.add_subplot(111)
         self._apply_dark_chart_style()
         self.ax.set_title(f"{coin}", color=DARK_FG)
+        self._base_ylim: Optional[Tuple[float, float]] = None  # candle range + pad
+        self._price_tags: List[Any] = []
 
         # Add axis labels
         self.ax.set_xlabel("Time", color=DARK_FG)
@@ -1031,7 +1063,7 @@ class CandleChart(ttk.Frame):
                         self.after_cancel(self._resize_after_id)
                     except Exception:
                         pass
-                self._resize_after_id = self.after_idle(self.canvas.draw_idle)
+                self._resize_after_id = self.after_idle(self._fit_and_draw)
             except Exception:
                 pass
 
@@ -1042,6 +1074,38 @@ class CandleChart(ttk.Frame):
         from pt_chart_patterns import PatternLayer
 
         self.pattern_layer = PatternLayer(self, status_label=self.patterns_status_label)
+
+    def fit_layout(self) -> None:
+        """Size the margins to the text actually drawn: the title, axis labels and tick
+        labels, plus a strip on the right while price tags are shown. The pattern labels
+        then go inside the plot, since the margins no longer leave room for them: the
+        price range widens only as far as they need, and a label at either end is
+        aligned inwards."""
+        fig, ax = self.fig, self.ax
+        layer = getattr(self, "pattern_layer", None)
+        labels = layer.label_artists() if layer is not None else []
+        for art in labels + self._price_tags:
+            art.set_in_layout(False)
+        right = 1.0 - _tag_strip(fig, self._price_tags)
+        if self._base_ylim:
+            ax.set_ylim(*self._base_ylim)
+        _fit_axes(fig, right)
+        if not (self._base_ylim and labels):
+            return
+        try:
+            from pt_chart_patterns import room_for_labels
+
+            height = float(ax.get_window_extent().height)
+            ax.set_ylim(*room_for_labels(*self._base_ylim, layer.label_reach(), height))
+        except Exception:
+            pass
+        _fit_axes(fig, right)  # the new range may change the price labels' width
+        layer.keep_labels_inside()
+
+    def _fit_and_draw(self) -> None:
+        self._resize_after_id = None
+        self.fit_layout()
+        self.canvas.draw_idle()
 
     def _apply_dark_chart_style(self) -> None:
         """Apply dark styling (called on init and after every ax.clear())."""
@@ -1145,10 +1209,13 @@ class CandleChart(ttk.Frame):
             # Restore axis labels after clearing
             self.ax.set_xlabel("Time", color=DARK_FG)
             self.ax.set_ylabel(f"{self.coin}USD", color=DARK_FG)
+        self._price_tags = []
+        self._base_ylim = None
 
         if not candles:
             self.ax.set_title(f"{self.coin} ({tf}) - no candles", color=DARK_FG)
             self.pattern_layer.update([], tf, folder, chart_cfg)
+            self.fit_layout()
             self.canvas.draw_idle()
             return
 
@@ -1202,6 +1269,7 @@ class CandleChart(ttk.Frame):
             if not math.isfinite(pad) or pad <= 0:
                 pad = max(abs(y_low) * 0.001, 1e-6)
             self.ax.set_ylim(y_low - pad, y_high + pad)
+            self._base_ylim = (y_low - pad, y_high + pad)
         except Exception:
             pass
 
@@ -1283,11 +1351,20 @@ class CandleChart(ttk.Frame):
                 if y is None:
                     return
                 try:
-                    yy = float(y)
-                    if (not math.isfinite(yy)) or yy <= 0:
+                    price = float(y)
+                    if (not math.isfinite(price)) or price <= 0:
                         return
                 except Exception:
                     return
+
+                # A price beyond the plot is tagged at the nearest edge, with an arrow
+                # towards it: its line is off the chart, and the margins are too
+                # narrow to hold the tag where the price would be.
+                yy, arrow = price, ""
+                if price > y1:
+                    yy, arrow = y1, " ▲"
+                elif price < y0:
+                    yy, arrow = y0, " ▼"
 
                 # Nudge labels apart if levels are very close
                 for prev in used_y:
@@ -1295,23 +1372,25 @@ class CandleChart(ttk.Frame):
                         yy = prev + y_pad
                 used_y.append(yy)
 
-                self.ax.text(
-                    1.01,
-                    yy,
-                    f"{tag} {_fmt_price(yy)}",
-                    transform=trans,
-                    ha="left",
-                    va="center",
-                    fontsize=8,
-                    color=color,
-                    bbox=dict(
-                        facecolor=DARK_BG2,
-                        edgecolor=color,
-                        boxstyle="round,pad=0.18",
-                        alpha=0.85,
-                    ),
-                    zorder=20,
-                    clip_on=False,
+                self._price_tags.append(
+                    self.ax.text(
+                        1.01,
+                        yy,
+                        f"{tag} {_fmt_price(price)}{arrow}",
+                        transform=trans,
+                        ha="left",
+                        va="center",
+                        fontsize=TAG_FONT_PT,
+                        color=color,
+                        bbox=dict(
+                            facecolor=DARK_BG2,
+                            edgecolor=color,
+                            boxstyle=f"round,pad={TAG_BOX_PAD}",
+                            alpha=0.85,
+                        ),
+                        zorder=20,
+                        clip_on=False,
+                    )
                 )
 
             # Map to your terminology: Ask=buy line, Bid=sell line
@@ -1455,6 +1534,7 @@ class CandleChart(ttk.Frame):
         except Exception:
             pass
 
+        self.fit_layout()
         self.canvas.draw_idle()
 
         self.neural_status_label.config(
@@ -1512,11 +1592,7 @@ class AccountValueChart(ttk.Frame):
 
         self.fig = Figure(figsize=(6.5, 3.5), dpi=100)
         self.fig.patch.set_facecolor(DARK_BG)
-
-        # Reserve bottom space so date+time x tick labels are always visible
-        # Also reserve right space so the price labels (Bid/Ask/DCA/Sell) can sit outside the plot.
-        # Also reserve a bit of top space so the title never gets clipped.
-        self.fig.subplots_adjust(bottom=0.25, right=0.87, top=0.8)
+        # margins: _fit_axes(), after every refresh and resize
 
         self.ax = self.fig.add_subplot(111)
         self._apply_dark_chart_style()
@@ -1560,11 +1636,16 @@ class AccountValueChart(ttk.Frame):
                         self.after_cancel(self._resize_after_id)
                     except Exception:
                         pass
-                self._resize_after_id = self.after_idle(self.canvas.draw_idle)
+                self._resize_after_id = self.after_idle(self._fit_and_draw)
             except Exception:
                 pass
 
         canvas_w.bind("<Configure>", _on_canvas_configure, add="+")
+
+    def _fit_and_draw(self) -> None:
+        self._resize_after_id = None
+        _fit_axes(self.fig)
+        self.canvas.draw_idle()
 
     def _apply_dark_chart_style(self) -> None:
         try:
@@ -1709,6 +1790,7 @@ class AccountValueChart(ttk.Frame):
         if not points:
             self.ax.set_title("Account Value - no data", color=DARK_FG)
             self.last_update_label.config(text="Last: N/A")
+            _fit_axes(self.fig)
             self.canvas.draw_idle()
             return
 
@@ -1843,6 +1925,7 @@ class AccountValueChart(ttk.Frame):
         except Exception:
             self.last_update_label.config(text="Last: N/A")
 
+        _fit_axes(self.fig)
         self.canvas.draw_idle()
 
 

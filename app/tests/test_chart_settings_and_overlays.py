@@ -648,6 +648,165 @@ def test_hidden_patterns_are_not_drawn(make_chart):
     assert "bullish_engulfing" not in labels(chart)
 
 
+# --- the chart fills its area -------------------------------------------------------
+
+NO_PRICE_TAGS = {key: False for key in ("ask", "bid", "avg", "dca", "trail")}
+
+
+def rising_then_hikkake():
+    """An uptrend whose last bar confirms a bullish Hikkake on the highest high, so its
+    label sits above the top of the candle range, on the last candle."""
+    rows = []
+    for k in range(30):
+        c = 100.0 + k
+        rows.append((c - 1, c + 0.5, c - 1.5, c))
+    rows += [
+        (129, 135, 127, 133),
+        (132, 134, 128.5, 130),
+        (130, 133, 128, 129),
+        (129, 137, 128.8, 136.5),
+    ]
+    return [cp.Bar(T0 + k * HOUR, *r) for k, r in enumerate(rows)]
+
+
+def wide_and_short(chart, w=1200, h=335):
+    """The size of the coin chart in the owner's screenshot of 2026-10-14."""
+    chart.fig.set_size_inches(w / chart.fig.dpi, h / chart.fig.dpi)
+
+
+def boxes(chart):
+    chart.canvas.draw()
+    return chart.ax.get_window_extent(), chart.fig.bbox
+
+
+EDGE_PX = 10  # most empty space between the outermost text and the chart's edge
+
+
+def edge_gaps(chart):
+    """Empty pixels above the title, below the x-axis name and left of the y-axis name."""
+    fig = chart.fig.bbox
+    title = chart.ax.title.get_window_extent()
+    xname = chart.ax.xaxis.label.get_window_extent()
+    yname = chart.ax.yaxis.label.get_window_extent()
+    return fig.y1 - title.y1, xname.y0 - fig.y0, yname.x0 - fig.x0
+
+
+def test_room_for_labels_widens_the_range_only_as_far_as_the_labels_need():
+    from pt_chart_patterns import room_for_labels
+
+    assert room_for_labels(0, 100, [], 300) == (0, 100)
+    assert room_for_labels(0, 100, [(50, True, 30)], 300) == (0, 100)  # room already
+    lo, hi = room_for_labels(0, 100, [(100, True, 30), (0, False, 60)], 300)
+    span = hi - lo
+    assert (hi - 100) / span * 300 == pytest.approx(30, rel=1e-6)
+    assert (0 - lo) / span * 300 == pytest.approx(60, rel=1e-6)
+
+
+def test_the_coin_chart_fills_a_wide_short_area(make_chart):
+    """Fixed margins left empty strips round the chart's text: 20% of the height above
+    and below the plot, 12.5% of the width on the left and 13% on the right."""
+    chart = make_chart(
+        as_candles(down_then_engulfing()), chart_cfg={"overlays": NO_PRICE_TAGS}
+    )
+    wide_and_short(chart)
+    refresh(chart)
+    ax, fig = boxes(chart)
+    assert all(0 <= gap < EDGE_PX for gap in edge_gaps(chart))
+    assert fig.x1 - ax.x1 < 0.01 * fig.width  # no price tags, no strip for them
+
+
+def test_price_tags_get_a_strip_and_a_price_off_the_plot_is_tagged_at_its_edge(
+    make_chart,
+):
+    chart = make_chart(as_candles(down_then_engulfing()))
+    wide_and_short(chart)
+    refresh(chart)  # DCA 98.0 is below the lowest low, 99.3
+    ax, fig = boxes(chart)
+    tags = {t.get_text().split()[0]: t for t in chart._price_tags}
+    assert set(tags) == {"ASK", "BID", "AVG", "DCA", "SELL"}
+    for tag in tags.values():
+        box = tag.get_window_extent()
+        assert ax.x1 < box.x0 and box.x1 <= fig.x1  # beside the plot, not cut off
+    assert fig.x1 - ax.x1 < 0.15 * fig.width
+    lo, hi = chart.ax.get_ylim()
+    assert tags["DCA"].get_text().endswith("▼")
+    assert tags["DCA"].get_position()[1] == pytest.approx(chart._base_ylim[0])
+    assert lo <= tags["DCA"].get_position()[1] <= hi
+    assert not tags["SELL"].get_text().endswith(("▲", "▼"))  # 102.0: on it
+
+
+def test_a_label_above_the_highest_candle_stays_inside_the_chart(make_chart):
+    bars = rising_then_hikkake()
+    chart = make_chart(
+        as_candles(bars), chart_cfg={"overlays": NO_PRICE_TAGS}, bars=bars
+    )
+    wide_and_short(chart)
+    refresh(chart)
+    chart.pattern_layer.wait()  # the labels arrive after the refresh
+    rec = next(
+        r
+        for r in chart.pattern_layer.records
+        if r["label"].detection.pattern_id == "hikkake_bullish"
+    )
+    assert rec["x_last"] == len(bars) - 1 and rec["up"]
+    ax, fig = boxes(chart)
+    box = rec["artist"].get_window_extent()
+    assert box.y1 <= ax.y1  # inside the plot, clear of the title
+    assert ax.x0 <= box.x0 and box.x1 <= ax.x1  # the last candle's label is aligned in
+    assert chart.ax.get_ylim()[1] > chart._base_ylim[1]  # the range grew to make room
+
+
+def test_labels_never_cover_the_price_tags_or_the_price_axis(make_chart):
+    bars = rising_then_hikkake()
+    chart = make_chart(as_candles(bars), bars=bars)  # every price tag on
+    wide_and_short(chart)
+    refresh(chart)
+    chart.pattern_layer.wait()
+    ax, fig = boxes(chart)
+    tag_boxes = [t.get_window_extent() for t in chart._price_tags]
+    assert tag_boxes and chart.pattern_layer.records
+    for rec in chart.pattern_layer.records:
+        box = rec["artist"].get_window_extent()
+        assert ax.x0 <= box.x0 and box.x1 <= ax.x1
+        assert not any(box.overlaps(tag) for tag in tag_boxes)
+
+
+def test_hovering_never_moves_the_plot(make_chart):
+    bars = rising_then_hikkake()
+    chart = make_chart(
+        as_candles(bars), chart_cfg={"overlays": NO_PRICE_TAGS}, bars=bars
+    )
+    wide_and_short(chart)
+    refresh(chart)
+    chart.pattern_layer.wait()
+    before = chart.ax.get_position().bounds
+    layer = chart.pattern_layer
+    layer._set_hover(layer.records[-1])  # its "next" and "into" notes sit outside it
+    refresh(chart)  # a refresh while hovering fits the layout again
+    assert layer._hover is not None
+    assert chart.ax.get_position().bounds == pytest.approx(before)
+
+
+def test_the_account_chart_fills_a_wide_short_area(tk_root, tmp_path):
+    import pt_hub
+
+    history = tmp_path / "account_value_history.jsonl"
+    history.write_text(
+        "".join(
+            json.dumps({"ts": T0 + k * 60, "total_account_value": 1000.0 + k}) + "\n"
+            for k in range(50)
+        )
+    )
+    chart = pt_hub.AccountValueChart(
+        tk_root, str(history), str(tmp_path / "trade_history.jsonl")
+    )
+    wide_and_short(chart)
+    chart.refresh()
+    ax, fig = boxes(chart)
+    assert all(0 <= gap < EDGE_PX for gap in edge_gaps(chart))
+    assert fig.x1 - ax.x1 < 0.03 * fig.width  # half the last date label, centred on it
+
+
 # --- the Chart settings pop-out (section 8) ------------------------------------------
 
 
