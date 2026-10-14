@@ -488,3 +488,22 @@ def test_the_coin_table_fits_three_columns_with_no_gap_after_the_last(hub):
             assert padx == (0, 8)
         else:
             assert padx in (0, (0, 0))  # no gap after the last column
+
+
+def test_the_chart_settings_cog_has_no_visible_border(hub):
+    """Owner, 2026-10-14: no border round the cog. Its border is painted in its own
+    background colour, idle and while hovered, so it keeps the tab buttons' height."""
+    cog = hub.chart_settings_button
+    style = ttk.Style(hub)
+    name = str(cog.cget("style"))
+    assert name == "ChartCog.TButton"
+    # the cog sits on the tab row, so idle it takes the row's colour (paper mode
+    # recolours the frames blue)
+    assert style.lookup(name, "background") == style.lookup("TFrame", "background")
+    for state in ([], ["active"], ["pressed"]):
+        bg = style.lookup(name, "background", state)
+        for edge in ("bordercolor", "lightcolor", "darkcolor", "focuscolor"):
+            assert style.lookup(name, edge, state) == bg, (state, edge)
+    hub.update_idletasks()
+    tab = hub._chart_tab_buttons["ACCOUNT"]
+    assert cog.winfo_reqheight() == tab.winfo_reqheight()

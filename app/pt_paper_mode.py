@@ -322,6 +322,21 @@ def apply_palette_to_style(
         ],
     )
 
+    # The Chart settings cog shows no border: its edges take its background, which
+    # is the frame colour, and hovering lights the whole button.
+    edges = ("background", "bordercolor", "lightcolor", "darkcolor", "focuscolor")
+    style.configure(
+        "ChartCog.TButton",
+        foreground=palette["FG"],
+        **{edge: palette["BG"] for edge in edges},
+    )
+    hover = [("pressed", palette["PANEL"]), ("active", palette["PANEL2"])]
+    style.map(
+        "ChartCog.TButton",
+        foreground=[("active", palette["ACCENT2"])],
+        **{edge: hover for edge in edges},
+    )
+
 
 def install_classic_widget_defaults(root: tk.Misc, palette: Dict[str, str]) -> None:
     """

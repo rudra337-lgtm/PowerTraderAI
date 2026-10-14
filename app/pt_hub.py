@@ -2520,6 +2520,31 @@ class PowerTraderHub(tk.Tk):
                 padding=(7, 7),
                 width=0,
             )
+
+            # The Chart settings cog has no visible border (owner, 2026-10-14): its
+            # border is painted in the row's own colour, so it stays as tall as the
+            # tab buttons, and hovering still lights it up.
+            style.configure(
+                "ChartCog.TButton",
+                background=DARK_BG,
+                foreground=DARK_FG,
+                bordercolor=DARK_BG,
+                lightcolor=DARK_BG,
+                darkcolor=DARK_BG,
+                focuscolor=DARK_BG,
+                padding=(7, 7),
+                width=0,
+            )
+            hover = [("pressed", DARK_PANEL), ("active", DARK_PANEL2)]
+            style.map(
+                "ChartCog.TButton",
+                background=hover,
+                bordercolor=hover,
+                lightcolor=hover,
+                darkcolor=hover,
+                focuscolor=hover,
+                foreground=[("active", DARK_ACCENT2)],
+            )
         except Exception:
             pass
 
@@ -7367,7 +7392,7 @@ Platform: {sys.platform}
         cog = ttk.Button(
             row,
             text="\u2699",
-            style="ChartTab.TButton",
+            style="ChartCog.TButton",
             command=self.open_chart_settings,
         )
         cog.pack(side="right", anchor="n", pady=(0, 6))
