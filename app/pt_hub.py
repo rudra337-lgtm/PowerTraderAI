@@ -352,6 +352,45 @@ def _atomic_write_text(path: str, content: str) -> None:
         pass
 
 
+class ScrollingRow(ttk.Frame):
+    """One row of widgets that scrolls sideways when it is wider than the space it
+    has; the scrollbar shows only then. Children go in ``inner``."""
+
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self._canvas = tk.Canvas(self, highlightthickness=0, bd=0, height=1)
+        try:
+            bg = ttk.Style(self).lookup("TFrame", "background")
+            if bg:
+                self._canvas.configure(bg=bg)
+        except Exception:
+            pass
+        self._bar = ttk.Scrollbar(self, orient="horizontal", command=self._canvas.xview)
+        self._canvas.configure(xscrollcommand=self._bar.set)
+        self.inner = ttk.Frame(self._canvas)
+        self._canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self._canvas.pack(side="top", fill="x")
+        self.inner.bind("<Configure>", self._fit, add="+")
+        self._canvas.bind("<Configure>", self._fit, add="+")
+
+    def add(self, widget: tk.Widget, padx=(0, 0), pady=(0, 0)) -> None:
+        widget.pack(side="left", padx=padx, pady=pady)
+
+    @property
+    def scrolls(self) -> bool:
+        return self._bar.winfo_manager() == "pack"
+
+    def _fit(self, event=None) -> None:
+        width, height = self.inner.winfo_reqwidth(), self.inner.winfo_reqheight()
+        self._canvas.configure(height=height, scrollregion=(0, 0, width, height))
+        need = width > self._canvas.winfo_width() > 1
+        if need and not self.scrolls:
+            self._bar.pack(side="top", fill="x", pady=(0, 4))
+        elif not need and self.scrolls:
+            self._bar.pack_forget()
+            self._canvas.xview_moveto(0)
+
+
 @dataclass
 class _WrapItem:
     w: tk.Widget
@@ -1018,41 +1057,13 @@ class CandleChart(ttk.Frame):
         top = ttk.Frame(self)
         top.pack(fill="x", padx=6, pady=6)
 
-        ttk.Label(top, text=f"{coin} chart").pack(side="left")
-
-        ttk.Label(top, text="Timeframe:").pack(side="left", padx=(12, 4))
-        self.tf_combo = ttk.Combobox(
-            top,
-            textvariable=self.timeframe_var,
-            values=self.settings_getter()["timeframes"],
-            state="readonly",
-            width=10,
-        )
-        self.tf_combo.pack(side="left")
-
-        # Debounce rapid timeframe changes so redraws don't stack
+        # No coin name and no timeframe box here (owner, 2026-10-14): the coin
+        # buttons above name the chart, and the hub's Timeframe box at the end of
+        # that row calls set_timeframe().
         self._tf_after_id = None
 
-        def _debounced_tf_change(*_):
-            try:
-                if self._tf_after_id:
-                    self.after_cancel(self._tf_after_id)
-            except Exception:
-                pass
-
-            def _do():
-                # Ask the hub to refresh charts on the next tick (single refresh)
-                try:
-                    self.event_generate("<<TimeframeChanged>>", when="tail")
-                except Exception:
-                    pass
-
-            self._tf_after_id = self.after(120, _do)
-
-        self.tf_combo.bind("<<ComboboxSelected>>", _debounced_tf_change)
-
         self.neural_status_label = ttk.Label(top, text="Neural: N/A")
-        self.neural_status_label.pack(side="left", padx=(12, 0))
+        self.neural_status_label.pack(side="left")
 
         # Candlestick patterns (FDS-CHART-001): a status line (click: list of all
         # detections) and the Chart settings pop-out.
@@ -1136,6 +1147,25 @@ class CandleChart(ttk.Frame):
         from pt_chart_patterns import PatternLayer
 
         self.pattern_layer = PatternLayer(self, status_label=self.patterns_status_label)
+
+    def set_timeframe(self, tf: str) -> None:
+        """Show ``tf``, chosen in the hub's Timeframe box. Rapid changes are debounced
+        so redraws don't stack."""
+        self.timeframe_var.set(tf)
+        try:
+            if self._tf_after_id:
+                self.after_cancel(self._tf_after_id)
+        except Exception:
+            pass
+
+        def _do():
+            # Ask the hub to refresh charts on the next tick (single refresh)
+            try:
+                self.event_generate("<<TimeframeChanged>>", when="tail")
+            except Exception:
+                pass
+
+        self._tf_after_id = self.after(120, _do)
 
     def fit_layout(self) -> None:
         """Size the margins to the text actually drawn: the title, axis labels and tick
@@ -3269,10 +3299,7 @@ class PowerTraderHub(tk.Tk):
         )
         self._charts_frame = charts_frame
 
-        # Multi-row "tabs" (WrapFrame)
-        self.chart_tabs_bar = WrapFrame(charts_frame)
-        # Keep left padding, remove right padding so tabs can reach the edge
-        self.chart_tabs_bar.pack(fill="x", padx=(6, 0), pady=(6, 0))
+        self._build_chart_tab_row(charts_frame)
 
         # Page container (no ttk.Notebook, so there are NO native tabs to show)
         self.chart_pages_container = ttk.Frame(charts_frame)
@@ -3310,6 +3337,7 @@ class PowerTraderHub(tk.Tk):
                     )
                 except Exception:
                     pass
+            self._show_chart_timeframe(name)
 
             # Immediately refresh the newly shown coin chart so candles appear right away
             # (even if trader/neural scripts are not running yet).
@@ -3373,7 +3401,7 @@ class PowerTraderHub(tk.Tk):
         self.chart_pages["ACCOUNT"] = acct_page
 
         acct_btn = ttk.Button(
-            self.chart_tabs_bar,
+            self.chart_tabs_bar.inner,
             text="ACCOUNT",
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
@@ -3395,7 +3423,7 @@ class PowerTraderHub(tk.Tk):
             self.chart_pages[coin] = page
 
             btn = ttk.Button(
-                self.chart_tabs_bar,
+                self.chart_tabs_bar.inner,
                 text=coin,
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
@@ -7308,6 +7336,59 @@ Platform: {sys.platform}
         except Exception:
             pass
 
+    def _build_chart_tab_row(self, charts_frame) -> None:
+        """The chart tab row (owner, 2026-10-14): the coin buttons in one row that
+        scrolls sideways when the panel is too narrow for it, and the Timeframe box
+        anchored at the right end, never overlapping the buttons."""
+        row = ttk.Frame(charts_frame)
+        row.pack(fill="x", padx=(6, 0), pady=(6, 0))
+        self._chart_tabs_row = row
+        box = ttk.Frame(row)
+        ttk.Label(box, text="Timeframe:").pack(side="left", padx=(0, 4))
+        combo = ttk.Combobox(
+            box,
+            values=self._settings_getter()["timeframes"],
+            state="readonly",
+            width=10,
+        )
+        combo.pack(side="left")
+        combo.bind("<<ComboboxSelected>>", self._on_chart_timeframe_selected)
+        self._chart_tf_box, self.chart_tf_combo = box, combo
+        self._pack_chart_tf_box()  # packed first, so the buttons get what is left
+        self.chart_tabs_bar = ScrollingRow(row)
+        self.chart_tabs_bar.pack(side="left", fill="x", expand=True)
+
+    def _pack_chart_tf_box(self) -> None:
+        bar = getattr(self, "chart_tabs_bar", None)
+        before = {"before": bar} if bar is not None and bar.winfo_exists() else {}
+        self._chart_tf_box.pack(
+            side="right", anchor="n", padx=(8, 6), pady=(4, 6), **before
+        )  # level with the buttons, also while the scrollbar shows
+
+    def _show_chart_timeframe(self, name: str) -> None:
+        """The Timeframe box shows the selected coin chart's timeframe. The account
+        chart has none, so the box is hidden there."""
+        box = getattr(self, "_chart_tf_box", None)
+        if box is None:
+            return
+        chart = getattr(self, "charts", {}).get(name)
+        try:
+            if chart is None:
+                box.pack_forget()
+                return
+            self.chart_tf_combo.set(chart.timeframe_var.get())
+            if box.winfo_manager() != "pack":
+                self._pack_chart_tf_box()
+        except Exception:
+            pass
+
+    def _on_chart_timeframe_selected(self, event=None) -> None:
+        chart = getattr(self, "charts", {}).get(
+            getattr(self, "_current_chart_page", "")
+        )
+        if chart is not None:
+            chart.set_timeframe(self.chart_tf_combo.get())
+
     def _rebuild_coin_chart_tabs(self) -> None:
         """
         Ensure the Charts multi-row tab bar + pages match self.coins.
@@ -7324,10 +7405,11 @@ Platform: {sys.platform}
         if selected not in (["ACCOUNT"] + list(self.coins)):
             selected = "ACCOUNT"
 
-        # Destroy existing tab bar + pages container (clean rebuild)
+        # Destroy existing tab row + pages container (clean rebuild)
         try:
-            if hasattr(self, "chart_tabs_bar") and self.chart_tabs_bar.winfo_exists():
-                self.chart_tabs_bar.destroy()
+            row = getattr(self, "_chart_tabs_row", None)
+            if row is not None and row.winfo_exists():
+                row.destroy()
         except Exception:
             pass
 
@@ -7341,8 +7423,7 @@ Platform: {sys.platform}
             pass
 
         # Recreate
-        self.chart_tabs_bar = WrapFrame(charts_frame)
-        self.chart_tabs_bar.pack(fill="x", padx=6, pady=(6, 0))
+        self._build_chart_tab_row(charts_frame)
 
         self.chart_pages_container = ttk.Frame(charts_frame)
         self.chart_pages_container.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -7373,6 +7454,7 @@ Platform: {sys.platform}
                     )
                 except Exception:
                     pass
+            self._show_chart_timeframe(name)
 
         self._show_chart_page = _show_page
 
@@ -7381,7 +7463,7 @@ Platform: {sys.platform}
         self.chart_pages["ACCOUNT"] = acct_page
 
         acct_btn = ttk.Button(
-            self.chart_tabs_bar,
+            self.chart_tabs_bar.inner,
             text="ACCOUNT",
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
@@ -7403,7 +7485,7 @@ Platform: {sys.platform}
             self.chart_pages[coin] = page
 
             btn = ttk.Button(
-                self.chart_tabs_bar,
+                self.chart_tabs_bar.inner,
                 text=coin,
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),

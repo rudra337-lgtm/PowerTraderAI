@@ -353,3 +353,80 @@ def test_each_coin_field_has_its_own_tooltip(hub):
     for widget in (dot, sym, age, sig):
         assert widget.bind("<Enter>"), "no tooltip on a coin field"
     assert not cell.bind("<Enter>")  # not a second tooltip on the frame itself
+
+
+# --- the chart tab row (owner, 2026-10-14) -------------------------------------------
+
+
+def test_the_timeframe_box_sits_at_the_right_end_of_the_chart_tab_row(hub):
+    hub._show_chart_page(hub.coins[0])  # the hub opens on ACCOUNT, which has none
+    row, box = hub._chart_tabs_row, hub._chart_tf_box
+    assert isinstance(hub.chart_tabs_bar, pt_hub.ScrollingRow)
+    assert row.pack_slaves()[0] is box  # packed first, so it keeps its room
+    assert box.pack_info()["side"] == "right"
+    assert all(
+        b.master is hub.chart_tabs_bar.inner for b in hub._chart_tab_buttons.values()
+    )
+
+
+def test_the_timeframe_box_follows_the_selected_coin_chart(hub):
+    box, combo = hub._chart_tf_box, hub.chart_tf_combo
+    hub._show_chart_page("ACCOUNT")
+    assert box.winfo_manager() == ""  # the account chart has no timeframe
+    coin = hub.coins[0]
+    chart = hub.charts[coin]
+    other = [tf for tf in combo.cget("values") if tf != chart.timeframe_var.get()][0]
+    hub._show_chart_page(coin)
+    assert box.winfo_manager() == "pack" and hub._chart_tabs_row.pack_slaves()[0] is box
+    assert combo.get() == chart.timeframe_var.get()
+    combo.set(other)
+    hub._on_chart_timeframe_selected()
+    assert chart.timeframe_var.get() == other
+    assert hub.charts[hub.coins[1]].timeframe_var.get() != other or len(hub.coins) < 2
+
+
+def test_the_coin_chart_toolbar_names_no_coin_and_has_no_timeframe_box(hub):
+    chart = hub.charts[hub.coins[0]]
+    widgets = all_widgets(chart)
+    assert not any(isinstance(w, ttk.Combobox) for w in widgets)
+    texts = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Label)]
+    assert not any(t.endswith(" chart") or t == "Timeframe:" for t in texts)
+
+
+def test_the_tab_row_scrolls_only_while_its_buttons_do_not_fit():
+    import tkinter as tk
+
+    root, error = None, None
+    for _ in range(10):  # Tk sometimes fails to read init.tcl on the first try
+        try:
+            root = tk.Tk()
+            break
+        except tk.TclError as exc:
+            error = exc
+    if root is None:
+        pytest.skip(f"Tk not available: {error}")
+    root.withdraw()
+    try:
+        row = pt_hub.ScrollingRow(root)
+        row.pack(fill="x")
+        for k in range(10):
+            row.add(ttk.Button(row.inner, text=f"COIN{k}"), padx=(0, 6))
+        root.update_idletasks()
+        # resizing the row or its buttons runs the fit
+        assert row._canvas.bind("<Configure>") and row.inner.bind("<Configure>")
+        # a hidden window gives every widget a width of 1, so the row's visible
+        # width is set here
+        visible = {"px": 300}
+        row._canvas.winfo_width = lambda: visible["px"]
+        needed = row.inner.winfo_reqwidth()
+        assert needed > 300
+        row._fit()
+        assert row.scrolls
+        visible["px"] = needed + 50
+        row._fit()
+        assert not row.scrolls  # wide enough: the scrollbar goes away
+        visible["px"] = 300
+        row._fit()
+        assert row.scrolls
+    finally:
+        root.destroy()
