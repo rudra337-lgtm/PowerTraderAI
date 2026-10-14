@@ -8510,7 +8510,9 @@ Platform: {sys.platform}
         )
 
     def _check_exchange_status_worker(self):
-        """Background worker to check exchange connectivity"""
+        """Background worker to check exchange connectivity. It only sets
+        ``_exchange_status``: Tk may be touched from the main thread alone, and
+        ``_tick`` shows the status there on every tick."""
         while True:
             try:
                 if not self._multi_exchange:
@@ -8526,7 +8528,6 @@ Platform: {sys.platform}
                         "status": "No exchange configured",
                         "details": "Configure API credentials in Settings to enable trading",
                     }
-                    self.after_idle(self._update_exchange_status_display)
                     time.sleep(30)
                     continue
 
@@ -8535,15 +8536,11 @@ Platform: {sys.platform}
                 # Update status
                 self._exchange_status = {"status": status, "details": details}
 
-                # Schedule GUI update
-                self.after_idle(self._update_exchange_status_display)
-
             except Exception as e:
                 self._exchange_status = {
                     "status": "Error",
                     "details": f"Status check failed: {str(e)}",
                 }
-                self.after_idle(self._update_exchange_status_display)
 
             # Check every 30 seconds
             time.sleep(30)

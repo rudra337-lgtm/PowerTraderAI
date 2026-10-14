@@ -545,8 +545,8 @@ def _normalize_optional_utc(value: Optional[datetime]) -> Optional[datetime]:
 
 
 def _normalize_utc(value: datetime) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        return value.replace(tzinfo=timezone.utc)
+    """``value`` in UTC. A naive datetime is local time, as ``datetime.now()`` gives
+    it; reading it as UTC put a 1-second-old expiry an hour in the future under BST."""
     return value.astimezone(timezone.utc)
 
 

@@ -29,7 +29,15 @@ ANCHORS = re.compile(r"__file__|getcwd|Path\.cwd")
 
 def production_files():
     for root, dirs, files in os.walk(APP_DIR):
-        dirs[:] = [d for d in dirs if d not in ("tests", "__pycache__", "node_modules")]
+        # not hidden folders or virtual environments: a local app/.venv (git-ignored)
+        # holds third-party packages, not the app's modules
+        dirs[:] = [
+            d
+            for d in dirs
+            if d
+            not in ("tests", "__pycache__", "node_modules", "venv", "site-packages")
+            and not d.startswith(".")
+        ]
         for name in files:
             if not name.endswith(".py") or name in ALLOWED:
                 continue
