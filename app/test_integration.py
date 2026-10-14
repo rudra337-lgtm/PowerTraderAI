@@ -4,17 +4,37 @@ Integration Test Suite for PowerTrader Hub
 Tests the complete integration of all advanced features
 """
 
+import gc
 import json
 import os
 import sys
 import tempfile
 import time
 import unittest
+from tkinter import ttk
 from unittest.mock import MagicMock, Mock, patch
 
 # Add current directory to path (we're already in app directory)
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _new_hub(test, hub_class):
+    """A hub for one test: hidden, and closed when the test ends, so no window or
+    Tk root outlives it. (Each used to stay open, with its threads, for the rest of
+    the run.)"""
+    hub = hub_class()
+    hub.withdraw()
+    test.addCleanup(_close_hub, hub)
+    return hub
+
+
+def _close_hub(hub):
+    try:
+        hub._on_close()  # the window's own close: stop its scripts, then destroy
+    except Exception:
+        pass
+    gc.collect()
 
 
 class TestPowerTraderHubIntegration(unittest.TestCase):
@@ -47,14 +67,16 @@ class TestPowerTraderHubIntegration(unittest.TestCase):
 
         try:
             # Create hub instance (but don't start mainloop)
-            hub = self.PowerTraderHub()
+            hub = _new_hub(self, self.PowerTraderHub)
 
             # Verify hub was created
             self.assertIsNotNone(hub)
 
-            # Check that hub has required attributes
-            self.assertTrue(hasattr(hub, "style"))
-            self.assertTrue(hasattr(hub, "title"))
+            # A real hub: its window title, its dark theme and its notebooks
+            self.assertIn("PowerTraderAI", hub.title())
+            self.assertEqual(ttk.Style(hub).theme_use(), "clam")
+            self.assertTrue(hasattr(hub, "bottom_notebook"))
+            self.assertTrue(hasattr(hub, "logs_nb"))
 
         except Exception as e:
             self._skip_if_display_error(e)
@@ -66,26 +88,21 @@ class TestPowerTraderHubIntegration(unittest.TestCase):
             self.skipTest("PowerTrader Hub not available")
 
         try:
-            hub = self.PowerTraderHub()
-
-            # Check that notebooks exist
-            self.assertTrue(hasattr(hub, "notebook"))
-            self.assertTrue(hasattr(hub, "bottom_notebook"))
-
-            # Count tabs
-            main_tabs = hub.notebook.tabs()
-            bottom_tabs = hub.bottom_notebook.tabs()
-
-            print(f"Main tabs: {len(main_tabs)}")
-            print(f"Bottom tabs: {len(bottom_tabs)}")
-
-            # Should have significant number of tabs (12+ with advanced features)
-            total_tabs = len(main_tabs) + len(bottom_tabs)
-            self.assertGreaterEqual(total_tabs, 8)  # At least 8 total tabs
-
+            hub = _new_hub(self, self.PowerTraderHub)
         except Exception as e:
-            # Tab creation may fail with missing dependencies
-            print(f"Tab integration test failed (may be due to missing deps): {e}")
+            self._skip_if_display_error(e)
+            raise
+
+        # The hub's notebooks: the log tabs (Training, Thinking, Trading) and the
+        # tabs under the charts (Current Trades, Trade History, ...)
+        log_tabs = hub.logs_nb.tabs()
+        bottom_tabs = hub.bottom_notebook.tabs()
+
+        print(f"Log tabs: {len(log_tabs)}")
+        print(f"Bottom tabs: {len(bottom_tabs)}")
+
+        self.assertEqual(len(log_tabs), 3)
+        self.assertGreaterEqual(len(log_tabs) + len(bottom_tabs), 8)
 
     def test_advanced_feature_availability(self):
         """Test availability of advanced features"""
@@ -136,14 +153,14 @@ class TestPowerTraderHubIntegration(unittest.TestCase):
         # Mock missing dependencies to test graceful degradation
         with patch.dict("sys.modules", {"pandas": None, "numpy": None}):
             try:
-                hub = self.PowerTraderHub()
+                hub = _new_hub(self, self.PowerTraderHub)
 
                 # Hub should still be created even with missing dependencies
                 self.assertIsNotNone(hub)
 
                 # Should have basic tabs even without advanced features
-                main_tabs = hub.notebook.tabs()
-                self.assertGreater(len(main_tabs), 0)
+                tabs = hub.bottom_notebook.tabs()
+                self.assertGreater(len(tabs), 0)
 
             except Exception as e:
                 self._skip_if_display_error(e)
@@ -159,15 +176,15 @@ class TestPowerTraderHubIntegration(unittest.TestCase):
             self.skipTest("PowerTrader Hub not available")
 
         try:
-            hub = self.PowerTraderHub()
+            hub = _new_hub(self, self.PowerTraderHub)
 
             # Test that hub doesn't crash on common operations
             # (These might fail but shouldn't crash the app)
 
             # Try to access tab methods
-            if hasattr(hub, "notebook"):
+            if hasattr(hub, "bottom_notebook"):
                 try:
-                    tab_count = len(hub.notebook.tabs())
+                    tab_count = len(hub.bottom_notebook.tabs())
                     self.assertGreaterEqual(tab_count, 0)
                 except:
                     pass  # Tab operations may fail but shouldn't crash
@@ -315,7 +332,7 @@ class TestPerformanceAndScalability(unittest.TestCase):
             from pt_hub import PowerTraderHub
 
             start_time = time.time()
-            hub = PowerTraderHub()
+            hub = _new_hub(self, PowerTraderHub)
             end_time = time.time()
 
             startup_time = end_time - start_time
@@ -344,7 +361,7 @@ class TestPerformanceAndScalability(unittest.TestCase):
             # Create hub
             from pt_hub import PowerTraderHub
 
-            hub = PowerTraderHub()
+            hub = _new_hub(self, PowerTraderHub)
 
             final_memory = process.memory_info().rss / 1024 / 1024  # MB
             memory_increase = final_memory - initial_memory

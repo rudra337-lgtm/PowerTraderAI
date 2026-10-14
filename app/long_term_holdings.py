@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import tkinter as tk
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -30,6 +31,19 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
     print("Warning: matplotlib not available. Chart features disabled.")
+
+
+@contextmanager
+def _connect(path: str):
+    """A connection that commits on success, rolls back on error and is always
+    closed. sqlite3's own ``with`` only commits: the connection stays open, and on
+    Windows the file stays locked, until the garbage collector frees it."""
+    conn = sqlite3.connect(path)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 @dataclass
@@ -80,7 +94,7 @@ class HoldingsDatabase:
 
     def _init_db(self):
         """Initialize the database tables"""
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS holdings (
@@ -123,7 +137,7 @@ class HoldingsDatabase:
 
     def add_holding(self, holding: Holding) -> int:
         """Add a new holding to the database"""
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -150,7 +164,7 @@ class HoldingsDatabase:
 
     def update_holding(self, holding: Holding):
         """Update an existing holding"""
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -178,14 +192,14 @@ class HoldingsDatabase:
 
     def delete_holding(self, holding_id: int):
         """Delete a holding from the database"""
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM holdings WHERE id=?", (holding_id,))
             conn.commit()
 
     def get_all_holdings(self) -> List[Holding]:
         """Retrieve all holdings from the database"""
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM holdings ORDER BY symbol")
             rows = cursor.fetchall()
@@ -212,7 +226,7 @@ class HoldingsDatabase:
         """Update the current price for a symbol"""
         timestamp = datetime.now().isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             cursor = conn.cursor()
             # Update current price in holdings
             cursor.execute(

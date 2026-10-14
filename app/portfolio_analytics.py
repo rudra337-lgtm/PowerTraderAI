@@ -8,6 +8,7 @@ import math
 import os
 import sqlite3
 import tkinter as tk
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from tkinter import filedialog, messagebox, ttk
@@ -41,6 +42,19 @@ try:
 except ImportError:
     SCIPY_AVAILABLE = False
     print("Warning: scipy not available. Statistical analysis limited.")
+
+
+@contextmanager
+def _connect(path: str):
+    """A connection that commits on success, rolls back on error and is always
+    closed. sqlite3's own ``with`` only commits: the connection stays open, and on
+    Windows the file stays locked, until the garbage collector frees it."""
+    conn = sqlite3.connect(path)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 @dataclass
@@ -98,7 +112,7 @@ class PortfolioAnalytics:
 
     def _init_db(self):
         """Initialize analytics database"""
-        with sqlite3.connect(self.db_path) as conn:
+        with _connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             # Portfolio snapshots table
@@ -169,7 +183,7 @@ class PortfolioAnalytics:
                 prices[symbol] = holding.get("current_price", 0)
                 quantities[symbol] = holding.get("quantity", 0)
 
-            with sqlite3.connect(self.db_path) as conn:
+            with _connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -201,7 +215,7 @@ class PortfolioAnalytics:
     ) -> Optional[PerformanceMetrics]:
         """Calculate portfolio performance metrics"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with _connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
                 # Get historical snapshots
@@ -294,7 +308,7 @@ class PortfolioAnalytics:
     ) -> Optional[RiskMetrics]:
         """Calculate risk metrics including VaR and Expected Shortfall"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with _connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
                 # Get recent snapshots for correlation analysis
@@ -422,7 +436,7 @@ class PortfolioAnalytics:
     ) -> Dict[str, List[Tuple[str, float]]]:
         """Get historical asset allocation data"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with _connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT timestamp, allocations_json
