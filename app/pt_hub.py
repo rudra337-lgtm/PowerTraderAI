@@ -1070,8 +1070,9 @@ class CandleChart(ttk.Frame):
         self.patterns_status_label = ttk.Label(top, text="", cursor="hand2")
         self.patterns_status_label.pack(side="left", padx=(12, 0))
 
-        # The Chart settings cog sits at the right end of the hub's tab row, and the
-        # last update time on the chart, at its bottom right (owner, 2026-10-14).
+        # The Chart settings cog sits at the right end of the hub's tab row. No "Last:"
+        # time: it was the neural level files' age, which says nothing about the
+        # chart, whose candles are fetched on every refresh (owner, 2026-10-14).
 
         # Figure
         # IMPORTANT: keep a stable DPI and resize the figure to the widget's pixel size.
@@ -1633,34 +1634,6 @@ class CandleChart(ttk.Frame):
             self.pattern_layer.update(candles, tf, folder, chart_cfg)
         except Exception:
             pass
-
-        # the neural levels' last update time, on the chart at its bottom right
-        last_ts = None
-        try:
-            if os.path.isfile(low_path):
-                last_ts = os.path.getmtime(low_path)
-            elif os.path.isfile(high_path):
-                last_ts = os.path.getmtime(high_path)
-        except Exception:
-            last_ts = None
-        last = time.strftime("%H:%M:%S", time.localtime(last_ts)) if last_ts else "N/A"
-        self.last_update_text = self.ax.text(
-            0.995,
-            0.015,
-            f"Last: {last}",
-            transform=self.ax.transAxes,
-            ha="right",
-            va="bottom",
-            fontsize=8,
-            color=DARK_FG,
-            bbox=dict(
-                facecolor=DARK_BG2,
-                edgecolor="none",
-                alpha=0.8,
-                boxstyle="round,pad=0.25",
-            ),
-            zorder=28,  # above the candles, lines and pattern labels (25)
-        )
 
         self.fit_layout()
         self.canvas.draw_idle()
