@@ -376,6 +376,11 @@ class ScrollingRow(ttk.Frame):
     def add(self, widget: tk.Widget, padx=(0, 0), pady=(0, 0)) -> None:
         widget.pack(side="left", padx=padx, pady=pady)
 
+    def set_width(self, width: int) -> None:
+        """How wide the visible part of the row is; less than its content scrolls."""
+        if int(float(self._canvas.cget("width"))) != int(width):
+            self._canvas.configure(width=int(width))
+
     @property
     def scrolls(self) -> bool:
         return self._bar.winfo_manager() == "pack"
@@ -1043,6 +1048,7 @@ class CandleChart(ttk.Frame):
         coin: str,
         settings_getter,
         trade_history_path: str,
+        status_parent: Optional[tk.Widget] = None,
     ):
         super().__init__(parent)
         self.fetcher = fetcher
@@ -1054,8 +1060,15 @@ class CandleChart(ttk.Frame):
             value=self.settings_getter()["default_timeframe"]
         )
 
-        top = ttk.Frame(self)
-        top.pack(fill="x", padx=6, pady=6)
+        # The status line (neural readout, pattern count). In the hub it sits in the
+        # tab row, right of the coin buttons, and the hub shows the selected chart's
+        # (owner, 2026-10-14); on its own the chart gives it a row above the plot.
+        if status_parent is None:
+            top = ttk.Frame(self)
+            top.pack(fill="x", padx=6, pady=6)
+        else:
+            top = ttk.Frame(status_parent)  # packed by the hub while selected
+        self.status_frame = top
 
         # No coin name and no timeframe box here (owner, 2026-10-14): the coin
         # buttons above name the chart, and the hub's Timeframe box at the end of
@@ -3358,6 +3371,7 @@ class PowerTraderHub(tk.Tk):
                 except Exception:
                     pass
             self._show_chart_timeframe(name)
+            self._show_chart_status(name)
 
             # Immediately refresh the newly shown coin chart so candles appear right away
             # (even if trader/neural scripts are not running yet).
@@ -3427,7 +3441,7 @@ class PowerTraderHub(tk.Tk):
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, 6), pady=(0, 6))
+        self.chart_tabs_bar.add(acct_btn, padx=(0, 6), pady=(0, 4))
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -3449,11 +3463,16 @@ class PowerTraderHub(tk.Tk):
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, 6), pady=(0, 6))
+            self.chart_tabs_bar.add(btn, padx=(0, 6), pady=(0, 4))
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
-                page, self.fetcher, coin, self._settings_getter, self.trade_history_path
+                page,
+                self.fetcher,
+                coin,
+                self._settings_getter,
+                self.trade_history_path,
+                status_parent=self._chart_status_slot,
             )
             chart.pack(fill="both", expand=True)
             self.charts[coin] = chart
@@ -3770,8 +3789,10 @@ class PowerTraderHub(tk.Tk):
 
                 min_top = 360
                 min_bottom = 220
-                # Set Charts to exactly 50% of window height
-                target = total // 2  # Split exactly in half
+                # Charts at half the window height, less the status row that moved
+                # into the tab row (owner, 2026-10-14): the chart keeps its height
+                # and the panel below gains the row's
+                target = total // 2 - self._moved_status_row_px()
                 target = max(min_top, min(total - min_bottom, target))
 
                 right_split.sashpos(0, int(target))
@@ -7382,7 +7403,7 @@ Platform: {sys.platform}
             style="ChartCog.TButton",
             command=self.open_chart_settings,
         )
-        cog.pack(side="right", anchor="n", pady=(0, 6))
+        cog.pack(side="right", anchor="n", pady=(0, 4))
         ToolTip(cog, "Chart settings")
         self.chart_settings_button = cog
         box = ttk.Frame(row)
@@ -7397,14 +7418,72 @@ Platform: {sys.platform}
         combo.bind("<<ComboboxSelected>>", self._on_chart_timeframe_selected)
         self._chart_tf_box, self.chart_tf_combo = box, combo
         self._pack_chart_tf_box()  # packed first, so the buttons get what is left
+        # The buttons, then the selected chart's status line straight after them
+        # (owner, 2026-10-14). The buttons are only as wide as their content or what
+        # the status, the Timeframe box and the cog leave, so they scroll first.
         self.chart_tabs_bar = ScrollingRow(row)
-        self.chart_tabs_bar.pack(side="left", fill="x", expand=True)
+        self.chart_tabs_bar.pack(side="left", anchor="n")
+        self._chart_status_slot = ttk.Frame(row)
+        self._chart_status_slot.pack(side="left", anchor="n", padx=(6, 0), pady=(9, 4))
+        for widget in (row, self._chart_status_slot, self.chart_tabs_bar.inner):
+            widget.bind("<Configure>", self._fit_chart_tab_row, add="+")
+
+    def _fit_chart_tab_row(self, event=None) -> None:
+        """Give the buttons what the row has left after the status line, the
+        Timeframe box and the cog, up to their full width; short of that they
+        scroll."""
+        row = getattr(self, "_chart_tabs_row", None)
+        bar = getattr(self, "chart_tabs_bar", None)
+        if row is None or bar is None:
+            return
+        try:
+            avail = int(row.winfo_width())
+            if avail <= 1:
+                return
+            used = 0
+            for widget in row.pack_slaves():
+                if widget is bar:
+                    continue
+                padx = widget.pack_info().get("padx", 0)
+                pads = sum(padx) if isinstance(padx, tuple) else 2 * int(padx)
+                used += int(widget.winfo_reqwidth()) + pads
+            bar.set_width(max(60, min(bar.inner.winfo_reqwidth(), avail - used)))
+        except Exception:
+            pass
+
+    def _show_chart_status(self, name: str) -> None:
+        """The selected coin chart's status line, in the tab row. The account chart
+        has none."""
+        for coin, chart in getattr(self, "charts", {}).items():
+            frame = getattr(chart, "status_frame", None)
+            if frame is None or frame.master is not getattr(
+                self, "_chart_status_slot", None
+            ):
+                continue
+            try:
+                if coin == name:
+                    if frame.winfo_manager() != "pack":
+                        frame.pack(side="left")
+                elif frame.winfo_manager():
+                    frame.pack_forget()
+            except Exception:
+                pass
+        self._fit_chart_tab_row()
+
+    def _moved_status_row_px(self) -> int:
+        """Height the coin charts' status row used to take above the plot (a label
+        and 6 px above and below it), plus the 2 px less gap under the buttons."""
+        try:
+            label = next(iter(self.charts.values())).neural_status_label
+            return int(label.winfo_reqheight()) + 2 * 6 + 2
+        except Exception:
+            return 0
 
     def _pack_chart_tf_box(self) -> None:
         bar = getattr(self, "chart_tabs_bar", None)
         before = {"before": bar} if bar is not None and bar.winfo_exists() else {}
         self._chart_tf_box.pack(
-            side="right", anchor="n", padx=(8, 6), pady=(6, 6), **before
+            side="right", anchor="n", padx=(8, 6), pady=(6, 4), **before
         )  # level with the buttons, also while the scrollbar shows
 
     def _show_chart_timeframe(self, name: str) -> None:
@@ -7499,6 +7578,7 @@ Platform: {sys.platform}
                 except Exception:
                     pass
             self._show_chart_timeframe(name)
+            self._show_chart_status(name)
 
         self._show_chart_page = _show_page
 
@@ -7512,7 +7592,7 @@ Platform: {sys.platform}
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, 6), pady=(0, 6))
+        self.chart_tabs_bar.add(acct_btn, padx=(0, 6), pady=(0, 4))
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -7534,11 +7614,16 @@ Platform: {sys.platform}
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, 6), pady=(0, 6))
+            self.chart_tabs_bar.add(btn, padx=(0, 6), pady=(0, 4))
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
-                page, self.fetcher, coin, self._settings_getter, self.trade_history_path
+                page,
+                self.fetcher,
+                coin,
+                self._settings_getter,
+                self.trade_history_path,
+                status_parent=self._chart_status_slot,
             )
             chart.pack(fill="both", expand=True)
             self.charts[coin] = chart
