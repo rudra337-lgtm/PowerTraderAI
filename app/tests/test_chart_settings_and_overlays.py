@@ -966,18 +966,43 @@ def test_the_pattern_list_has_no_unthemed_strip(tk_root):
     win.destroy()
 
 
-def test_the_last_update_time_sits_on_the_chart_at_its_bottom_right(make_chart):
-    """Owner, 2026-10-14: moved from the toolbar onto the chart. The cog moved to the
-    hub's tab row (test_hub_layout)."""
+def test_ask_and_bid_lines_are_dotted_while_the_trader_is_stopped(make_chart):
+    """Owner, 2026-10-14: ASK and BID come from the trader, so while it is stopped
+    they are its last prices, drawn dotted. Every other line stays solid."""
     chart = make_chart(as_candles(down_then_engulfing()))
-    wide_and_short(chart)
+
+    def styles(running):
+        chart.refresh(
+            {"BTC": chart.folder},
+            current_buy_price=101.0,
+            current_sell_price=100.8,
+            trail_line=102.0,
+            dca_line_price=98.0,
+            avg_cost_basis=99.5,
+            trader_running=running,
+        )
+        return {
+            line.get_color(): line.get_linestyle()
+            for line in chart.ax.lines
+            if line.get_color() in ("purple", "teal", "yellow", "red", "green")
+            and len(set(line.get_ydata())) == 1  # the level lines, not candle wicks
+        }
+
+    stopped = styles(False)
+    assert stopped["purple"] == ":" and stopped["teal"] == ":"  # ASK, BID
+    assert all(stopped[c] == "-" for c in ("yellow", "red", "green"))  # AVG, DCA, SELL
+    running = styles(True)
+    assert running["purple"] == "-" and running["teal"] == "-"
+
+
+def test_the_coin_chart_shows_no_last_update_time(make_chart):
+    """Owner, 2026-10-14: "Last:" was the neural level files' age, not the chart's,
+    so it is gone from the chart. The cog moved to the hub's tab row
+    (test_hub_layout)."""
+    chart = make_chart(as_candles(down_then_engulfing()))
     refresh(chart)
-    ax, fig = boxes(chart)
-    note = chart.last_update_text
-    assert note in chart.ax.texts and note.get_text().startswith("Last: ")
-    assert note.get_text() != "Last: N/A"  # the test folder has its neural files
-    box = note.get_window_extent()
-    assert ax.x1 - 15 <= box.x1 <= ax.x1 and ax.y0 <= box.y0 <= ax.y0 + 15
+    assert not any(t.get_text().startswith("Last:") for t in chart.ax.texts)
+    assert not hasattr(chart, "last_update_text")
     assert not hasattr(chart, "chart_settings_button")
     assert not hasattr(chart, "last_update_label")
     assert chart.canvas.get_tk_widget().pack_info()["pady"] in (0, (0, 0))

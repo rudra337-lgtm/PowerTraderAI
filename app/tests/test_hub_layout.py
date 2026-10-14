@@ -467,3 +467,59 @@ def test_the_charts_sit_5px_from_the_panel_edges(hub):
     info = hub.chart_pages_container.pack_info()
     assert info["padx"] in (5, (5, 5)) and info["pady"] == (0, 5)
     assert hub._chart_tabs_row.pack_info()["padx"] in (5, (5, 5))
+
+
+def test_the_coin_table_fits_three_columns_with_no_gap_after_the_last(hub):
+    """Owner, 2026-10-14: the left pane is 32 px narrower (438 px), so the column
+    rule counts the 8 px gap between columns only, not after the last one."""
+    hub.update_idletasks()  # measure the cells
+    cells = hub._training_cells
+    cell = max(c[0].winfo_reqwidth() for c in cells.values())
+    assert cell > 50
+    for width, cols in ((3 * cell + 2 * 8, 3), (3 * cell + 2 * 8 - 1, 2)):
+        hub.training_status_frame.winfo_width = lambda w=width: w
+        hub._training_table_cols = 0  # lay out again
+        hub._layout_training_table()
+        assert hub._training_table_cols == cols, width
+    rows = -(-len(cells) // 2)  # the last layout: two columns
+    for i, coin in enumerate(hub._training_table_coins):
+        padx = cells[coin][0].grid_info()["padx"]
+        if i // rows == 0:
+            assert padx == (0, 8)
+        else:
+            assert padx in (0, (0, 0))  # no gap after the last column
+
+
+def test_the_chart_settings_cog_has_no_visible_border(hub):
+    """Owner, 2026-10-14: no border round the cog. Its border is painted in its own
+    background colour, idle and while hovered, so it keeps the tab buttons' height."""
+    cog = hub.chart_settings_button
+    style = ttk.Style(hub)
+    name = str(cog.cget("style"))
+    assert name == "ChartCog.TButton"
+    # the cog sits on the tab row, so idle it takes the row's colour (paper mode
+    # recolours the frames blue)
+    assert style.lookup(name, "background") == style.lookup("TFrame", "background")
+    for state in ([], ["active"], ["pressed"]):
+        bg = style.lookup(name, "background", state)
+        for edge in ("bordercolor", "lightcolor", "darkcolor", "focuscolor"):
+            assert style.lookup(name, edge, state) == bg, (state, edge)
+    hub.update_idletasks()
+    tab = hub._chart_tab_buttons["ACCOUNT"]
+    assert cog.winfo_reqheight() == tab.winfo_reqheight()
+
+
+def test_coin_charts_learn_whether_the_trader_is_running(hub, monkeypatch):
+    """ASK/BID are drawn dotted while the trader is stopped, so every coin-chart
+    refresh says whether it runs, by the same rule as the "Trader:" label."""
+    import time
+
+    assert hub._trader_is_running() is False  # no trader started in tests
+    coin = hub.coins[0]
+    seen = []
+    monkeypatch.setattr(hub.charts[coin], "refresh", lambda *a, **k: seen.append(k))
+    hub._show_chart_page(coin)  # refreshes the shown chart on the next tick
+    deadline = time.time() + 2
+    while not seen and time.time() < deadline:
+        hub.update()
+    assert seen and seen[-1].get("trader_running") is False

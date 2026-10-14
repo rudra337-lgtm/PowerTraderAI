@@ -1070,8 +1070,9 @@ class CandleChart(ttk.Frame):
         self.patterns_status_label = ttk.Label(top, text="", cursor="hand2")
         self.patterns_status_label.pack(side="left", padx=(12, 0))
 
-        # The Chart settings cog sits at the right end of the hub's tab row, and the
-        # last update time on the chart, at its bottom right (owner, 2026-10-14).
+        # The Chart settings cog sits at the right end of the hub's tab row. No "Last:"
+        # time: it was the neural level files' age, which says nothing about the
+        # chart, whose candles are fetched on every refresh (owner, 2026-10-14).
 
         # Figure
         # IMPORTANT: keep a stable DPI and resize the figure to the widget's pixel size.
@@ -1216,6 +1217,7 @@ class CandleChart(ttk.Frame):
         trail_line: Optional[float] = None,
         dca_line_price: Optional[float] = None,
         avg_cost_basis: Optional[float] = None,
+        trader_running: bool = True,
     ) -> None:
         cfg = self.settings_getter()
         chart_cfg = chart_settings.normalize(cfg.get("chart"))
@@ -1406,7 +1408,9 @@ class CandleChart(ttk.Frame):
         except Exception:
             pass
 
-        # Overlay current ask/bid prices
+        # Overlay current ask/bid prices. They come from the trader, so while it is
+        # stopped they are its last prices, drawn dotted (owner, 2026-10-14).
+        quote_style = "-" if trader_running else ":"
         try:
             if (
                 show("ask")
@@ -1416,6 +1420,7 @@ class CandleChart(ttk.Frame):
                 self.ax.axhline(
                     y=float(current_buy_price),
                     linewidth=1.5,
+                    linestyle=quote_style,
                     color="purple",
                     alpha=0.95,
                 )
@@ -1429,7 +1434,11 @@ class CandleChart(ttk.Frame):
                 and float(current_sell_price) > 0
             ):
                 self.ax.axhline(
-                    y=float(current_sell_price), linewidth=1.5, color="teal", alpha=0.95
+                    y=float(current_sell_price),
+                    linewidth=1.5,
+                    linestyle=quote_style,
+                    color="teal",
+                    alpha=0.95,
                 )
         except Exception:
             pass
@@ -1633,34 +1642,6 @@ class CandleChart(ttk.Frame):
             self.pattern_layer.update(candles, tf, folder, chart_cfg)
         except Exception:
             pass
-
-        # the neural levels' last update time, on the chart at its bottom right
-        last_ts = None
-        try:
-            if os.path.isfile(low_path):
-                last_ts = os.path.getmtime(low_path)
-            elif os.path.isfile(high_path):
-                last_ts = os.path.getmtime(high_path)
-        except Exception:
-            last_ts = None
-        last = time.strftime("%H:%M:%S", time.localtime(last_ts)) if last_ts else "N/A"
-        self.last_update_text = self.ax.text(
-            0.995,
-            0.015,
-            f"Last: {last}",
-            transform=self.ax.transAxes,
-            ha="right",
-            va="bottom",
-            fontsize=8,
-            color=DARK_FG,
-            bbox=dict(
-                facecolor=DARK_BG2,
-                edgecolor="none",
-                alpha=0.8,
-                boxstyle="round,pad=0.25",
-            ),
-            zorder=22,
-        )
 
         self.fit_layout()
         self.canvas.draw_idle()
@@ -2520,6 +2501,31 @@ class PowerTraderHub(tk.Tk):
                 padding=(7, 7),
                 width=0,
             )
+
+            # The Chart settings cog has no visible border (owner, 2026-10-14): its
+            # border is painted in the row's own colour, so it stays as tall as the
+            # tab buttons, and hovering still lights it up.
+            style.configure(
+                "ChartCog.TButton",
+                background=DARK_BG,
+                foreground=DARK_FG,
+                bordercolor=DARK_BG,
+                lightcolor=DARK_BG,
+                darkcolor=DARK_BG,
+                focuscolor=DARK_BG,
+                padding=(7, 7),
+                width=0,
+            )
+            hover = [("pressed", DARK_PANEL), ("active", DARK_PANEL2)]
+            style.map(
+                "ChartCog.TButton",
+                background=hover,
+                bordercolor=hover,
+                lightcolor=hover,
+                darkcolor=hover,
+                focuscolor=hover,
+                foreground=[("active", DARK_ACCENT2)],
+            )
         except Exception:
             pass
 
@@ -2938,7 +2944,8 @@ class PowerTraderHub(tk.Tk):
 
                 min_left = 360
                 min_right = 520
-                desired_left = 470  # ~matches your screenshot
+                # 438: the coin table's three columns with no spare strip (owner, 2026-10-14)
+                desired_left = 438
                 target = max(min_left, min(total - min_right, desired_left))
                 outer.sashpos(0, int(target))
 
@@ -3398,6 +3405,7 @@ class PowerTraderHub(tk.Tk):
                                     trail_line=trail_line,
                                     dca_line_price=dca_line_price,
                                     avg_cost_basis=avg_cost_basis,
+                                    trader_running=self._trader_is_running(),
                                 )
 
                             except Exception:
@@ -5983,19 +5991,25 @@ Platform: {sys.platform}
         width = self.training_status_frame.winfo_width()
         if width <= 1:
             width = 300
+        gap = 8  # between columns; none after the last, so three fit at 438 px
         try:
-            cell_w = max(c[0].winfo_reqwidth() for c in cells.values()) + 10
+            cell_w = max(c[0].winfo_reqwidth() for c in cells.values())
         except Exception:
             cell_w = 0
-        if cell_w <= 11:  # not measured yet
-            cell_w = 150
-        cols = max(1, min(len(cells), width // cell_w))
+        if cell_w <= 1:  # not measured yet
+            cell_w = 140
+        cols = max(1, min(len(cells), (width + gap) // (cell_w + gap)))
         if cols != getattr(self, "_training_table_cols", 0):
             self._training_table_cols = cols
             rows = -(-len(cells) // cols)
+            last = (len(cells) - 1) // rows
             for i, coin in enumerate(self._training_table_coins):
                 cells[coin][0].grid(
-                    row=i % rows, column=i // rows, sticky="w", padx=(0, 8), pady=1
+                    row=i % rows,
+                    column=i // rows,
+                    sticky="w",
+                    padx=(0, gap if i // rows < last else 0),
+                    pady=1,
                 )
         # the table's final height is known once its width is: fit the split again
         fit = getattr(self, "_fit_left_split", None)
@@ -6265,6 +6279,7 @@ Platform: {sys.platform}
                 trail_line=trail_line,
                 dca_line_price=dca_line_price,
                 avg_cost_basis=avg_cost_basis,
+                trader_running=self._trader_is_running(),
             )
 
             # Keep the periodic refresh behavior consistent (prevents an immediate full refresh right after this).
@@ -6305,14 +6320,17 @@ Platform: {sys.platform}
             if follow:
                 txt.see("end")
 
+    def _trader_is_running(self) -> bool:
+        """The trader this hub started is alive (the "Trader:" label's rule)."""
+        proc = getattr(getattr(self, "proc_trader", None), "proc", None)
+        return bool(proc and proc.poll() is None)
+
     def _tick(self) -> None:
         # process labels
         neural_running = bool(
             self.proc_neural.proc and self.proc_neural.proc.poll() is None
         )
-        trader_running = bool(
-            self.proc_trader.proc and self.proc_trader.proc.poll() is None
-        )
+        trader_running = self._trader_is_running()
 
         self.lbl_neural.config(text=f"{'running' if neural_running else 'stopped'}")
         self.lbl_trader.config(text=f"{'running' if trader_running else 'stopped'}")
@@ -6491,6 +6509,7 @@ Platform: {sys.platform}
                             trail_line=trail_line,
                             dca_line_price=dca_line_price,
                             avg_cost_basis=avg_cost_basis,
+                            trader_running=self._trader_is_running(),
                         )
                     except Exception:
                         pass
@@ -7360,7 +7379,7 @@ Platform: {sys.platform}
         cog = ttk.Button(
             row,
             text="\u2699",
-            style="ChartTab.TButton",
+            style="ChartCog.TButton",
             command=self.open_chart_settings,
         )
         cog.pack(side="right", anchor="n", pady=(0, 6))
