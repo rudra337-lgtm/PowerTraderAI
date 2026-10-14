@@ -1659,7 +1659,7 @@ class CandleChart(ttk.Frame):
                 alpha=0.8,
                 boxstyle="round,pad=0.25",
             ),
-            zorder=22,
+            zorder=28,  # above the candles, lines and pattern labels (25)
         )
 
         self.fit_layout()
