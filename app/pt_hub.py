@@ -1041,7 +1041,7 @@ class CandleChart(ttk.Frame):
 
         self.ax = self.fig.add_subplot(111)
         self._apply_dark_chart_style()
-        self.ax.set_title(f"{coin}", color=DARK_FG)
+        # no title: the toolbar above already names the coin and the timeframe
         self._base_ylim: Optional[Tuple[float, float]] = None  # candle range + pad
         self._price_tags: List[Any] = []
 
@@ -1232,7 +1232,15 @@ class CandleChart(ttk.Frame):
         self._base_ylim = None
 
         if not candles:
-            self.ax.set_title(f"{self.coin} ({tf}) - no candles", color=DARK_FG)
+            self.ax.text(
+                0.5,
+                0.5,
+                f"{self.coin} ({tf}): no candles",
+                transform=self.ax.transAxes,
+                ha="center",
+                va="center",
+                color=DARK_FG,
+            )
             self.pattern_layer.update([], tf, folder, chart_cfg)
             self.fit_layout()
             self.canvas.draw_idle()
@@ -1510,8 +1518,6 @@ class CandleChart(ttk.Frame):
             pass
 
         self.ax.set_xlim(-0.5, (len(candles) - 0.5) + 0.6)
-
-        self.ax.set_title(f"{self.coin} ({tf})", color=DARK_FG)
 
         # x tick labels (date + time) - evenly spaced, never overlapping duplicates
         n = len(candles)

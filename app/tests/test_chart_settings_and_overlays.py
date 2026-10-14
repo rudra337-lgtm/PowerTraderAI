@@ -694,12 +694,11 @@ EDGE_PX = 10  # most empty space between the outermost text and the chart's edge
 
 
 def edge_gaps(chart):
-    """Empty pixels above the title, below the x-axis name and left of the y-axis name."""
+    """Empty pixels between the chart's outermost text and the top, bottom and left
+    edges."""
     fig = chart.fig.bbox
-    title = chart.ax.title.get_window_extent()
-    xname = chart.ax.xaxis.label.get_window_extent()
-    yname = chart.ax.yaxis.label.get_window_extent()
-    return fig.y1 - title.y1, xname.y0 - fig.y0, yname.x0 - fig.x0
+    text = chart.ax.get_tightbbox(chart.canvas.get_renderer())
+    return fig.y1 - text.y1, text.y0 - fig.y0, text.x0 - fig.x0
 
 
 def test_room_for_labels_widens_the_range_only_as_far_as_the_labels_need():
@@ -725,6 +724,20 @@ def test_the_coin_chart_fills_a_wide_short_area(make_chart):
         fig.x1 - ax.x1 < EDGE_PX
     )  # no price tags, no strip; the last date ends inside
     assert chart.ax.get_xticklabels()[-1].get_window_extent().x1 <= ax.x1
+
+
+def test_the_coin_chart_has_no_title_and_says_when_there_are_no_candles(make_chart):
+    """The toolbar above the chart already names the coin and the timeframe."""
+    chart = make_chart(as_candles(down_then_engulfing()))
+    wide_and_short(chart)
+    refresh(chart)
+    ax, fig = boxes(chart)
+    assert chart.ax.get_title() == ""
+    assert fig.y1 - ax.y1 < EDGE_PX  # the plot starts at the top
+    empty = make_chart([], trade_ts=T0, bars=down_then_engulfing())
+    refresh(empty)
+    assert empty.ax.get_title() == ""
+    assert [t.get_text() for t in empty.ax.texts] == ["BTC (1hour): no candles"]
 
 
 def test_price_tags_get_a_strip_and_a_price_off_the_plot_is_tagged_at_its_edge(
