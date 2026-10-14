@@ -2938,7 +2938,8 @@ class PowerTraderHub(tk.Tk):
 
                 min_left = 360
                 min_right = 520
-                desired_left = 470  # ~matches your screenshot
+                # 438: the coin table's three columns with no spare strip (owner, 2026-10-14)
+                desired_left = 438
                 target = max(min_left, min(total - min_right, desired_left))
                 outer.sashpos(0, int(target))
 
@@ -5983,19 +5984,25 @@ Platform: {sys.platform}
         width = self.training_status_frame.winfo_width()
         if width <= 1:
             width = 300
+        gap = 8  # between columns; none after the last, so three fit at 438 px
         try:
-            cell_w = max(c[0].winfo_reqwidth() for c in cells.values()) + 10
+            cell_w = max(c[0].winfo_reqwidth() for c in cells.values())
         except Exception:
             cell_w = 0
-        if cell_w <= 11:  # not measured yet
-            cell_w = 150
-        cols = max(1, min(len(cells), width // cell_w))
+        if cell_w <= 1:  # not measured yet
+            cell_w = 140
+        cols = max(1, min(len(cells), (width + gap) // (cell_w + gap)))
         if cols != getattr(self, "_training_table_cols", 0):
             self._training_table_cols = cols
             rows = -(-len(cells) // cols)
+            last = (len(cells) - 1) // rows
             for i, coin in enumerate(self._training_table_coins):
                 cells[coin][0].grid(
-                    row=i % rows, column=i // rows, sticky="w", padx=(0, 8), pady=1
+                    row=i % rows,
+                    column=i // rows,
+                    sticky="w",
+                    padx=(0, gap if i // rows < last else 0),
+                    pady=1,
                 )
         # the table's final height is known once its width is: fit the split again
         fit = getattr(self, "_fit_left_split", None)

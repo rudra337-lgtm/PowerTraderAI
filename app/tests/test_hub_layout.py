@@ -467,3 +467,24 @@ def test_the_charts_sit_5px_from_the_panel_edges(hub):
     info = hub.chart_pages_container.pack_info()
     assert info["padx"] in (5, (5, 5)) and info["pady"] == (0, 5)
     assert hub._chart_tabs_row.pack_info()["padx"] in (5, (5, 5))
+
+
+def test_the_coin_table_fits_three_columns_with_no_gap_after_the_last(hub):
+    """Owner, 2026-10-14: the left pane is 32 px narrower (438 px), so the column
+    rule counts the 8 px gap between columns only, not after the last one."""
+    hub.update_idletasks()  # measure the cells
+    cells = hub._training_cells
+    cell = max(c[0].winfo_reqwidth() for c in cells.values())
+    assert cell > 50
+    for width, cols in ((3 * cell + 2 * 8, 3), (3 * cell + 2 * 8 - 1, 2)):
+        hub.training_status_frame.winfo_width = lambda w=width: w
+        hub._training_table_cols = 0  # lay out again
+        hub._layout_training_table()
+        assert hub._training_table_cols == cols, width
+    rows = -(-len(cells) // 2)  # the last layout: two columns
+    for i, coin in enumerate(hub._training_table_coins):
+        padx = cells[coin][0].grid_info()["padx"]
+        if i // rows == 0:
+            assert padx == (0, 8)
+        else:
+            assert padx in (0, (0, 0))  # no gap after the last column
