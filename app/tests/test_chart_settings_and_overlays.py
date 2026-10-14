@@ -696,8 +696,14 @@ EDGE_PX = 10  # most empty space between the outermost text and the chart's edge
 def edge_gaps(chart):
     """Empty pixels between the chart's outermost text and the top, bottom and left
     edges."""
+    from matplotlib.transforms import Bbox
+
     fig = chart.fig.bbox
-    text = chart.ax.get_tightbbox(chart.canvas.get_renderer())
+    renderer = chart.canvas.get_renderer()
+    text = Bbox.union(
+        [chart.ax.get_tightbbox(renderer)]
+        + [t.get_window_extent(renderer) for t in chart.fig.texts]
+    )
     return fig.y1 - text.y1, text.y0 - fig.y0, text.x0 - fig.x0
 
 
@@ -720,10 +726,33 @@ def test_the_coin_chart_fills_a_wide_short_area(make_chart):
     refresh(chart)
     ax, fig = boxes(chart)
     assert all(0 <= gap < EDGE_PX for gap in edge_gaps(chart))
-    assert (
-        fig.x1 - ax.x1 < EDGE_PX
-    )  # no price tags, no strip; the last date ends inside
+    time_name = chart._time_name.get_window_extent()
+    assert fig.x1 - time_name.x1 < EDGE_PX  # no price tags: only the time name's room
     assert chart.ax.get_xticklabels()[-1].get_window_extent().x1 <= ax.x1
+
+
+def test_the_axis_names_sit_in_the_corners(make_chart):
+    """Owner, 2026-10-14: the price name level at the top left, above the price labels,
+    and "Time" at the bottom right, beside the last date, so neither holds a row or a
+    column of its own."""
+    chart = make_chart(as_candles(many_bars()), chart_cfg={"overlays": NO_PRICE_TAGS})
+    wide_and_short(chart)
+    refresh(chart)
+    ax, fig = boxes(chart)
+    assert chart.ax.get_xlabel() == "" and chart.ax.get_ylabel() == ""
+    price = chart._price_name
+    assert price.get_text() == "BTCUSD" and price.get_rotation() == 0
+    box = price.get_window_extent()
+    assert box.x0 - fig.x0 < EDGE_PX and ax.y1 <= box.y0 and fig.y1 - box.y1 < EDGE_PX
+    lo, hi = chart.ax.get_ylim()
+    for label in chart.ax.get_yticklabels():  # the drawn ones, top tick included
+        if label.get_text() and lo <= label.get_position()[1] <= hi:
+            assert not label.get_window_extent().overlaps(box)
+    time_name = chart._time_name.get_window_extent()
+    last_date = chart.ax.get_xticklabels()[-1].get_window_extent()
+    assert ax.x1 < time_name.x0 and time_name.y1 <= ax.y0  # right of the plot, below it
+    assert time_name.y0 >= last_date.y0  # inside the dates' row: no row of its own
+    assert last_date.x1 < time_name.x0
 
 
 def test_the_coin_chart_has_no_title_and_says_when_there_are_no_candles(make_chart):
@@ -733,7 +762,8 @@ def test_the_coin_chart_has_no_title_and_says_when_there_are_no_candles(make_cha
     refresh(chart)
     ax, fig = boxes(chart)
     assert chart.ax.get_title() == ""
-    assert fig.y1 - ax.y1 < EDGE_PX  # the plot starts at the top
+    name = chart._price_name.get_window_extent()
+    assert ax.y1 <= name.y0 and fig.y1 - name.y1 < EDGE_PX  # only the price name above
     empty = make_chart([], trade_ts=T0, bars=down_then_engulfing())
     refresh(empty)
     assert empty.ax.get_title() == ""

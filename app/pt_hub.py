@@ -29,7 +29,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter
-from matplotlib.transforms import blended_transform_factory
+from matplotlib.transforms import ScaledTranslation, blended_transform_factory
 
 import chart_settings
 import pt_paths
@@ -908,24 +908,27 @@ class CandleFetcher:
 CHART_PAD = 0.4  # space round the chart's outer text, as a fraction of the font size
 TAG_FONT_PT = 8  # right-hand price tags (ASK, BID, AVG, DCA, SELL)
 TAG_BOX_PAD = 0.18  # their box padding, as a fraction of the font size
+NAME_GAP_PT = 6  # price name above the plot: clear of a price label on the top tick
 
 
-def _fit_axes(fig: Figure, right: float = 1.0) -> None:
+def _fit_axes(fig: Figure, right: float = 1.0, top: float = 1.0) -> None:
     """Fit the plot and its axis text into the figure, leaving the share of the width to
-    the right of ``right`` free."""
+    the right of ``right`` and the share of the height above ``top`` free."""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # too small to fit: keep the last layout
-            fig.tight_layout(pad=CHART_PAD, rect=(0.0, 0.0, max(0.5, right), 1.0))
+            fig.tight_layout(
+                pad=CHART_PAD, rect=(0.0, 0.0, max(0.5, right), max(0.5, top))
+            )
     except Exception:
         pass
 
 
-def _fit_axes_beside(fig: Figure, tags: List[Any]) -> float:
+def _fit_axes_beside(fig: Figure, tags: List[Any], top: float = 1.0) -> float:
     """Fit the axes, then take only as much width from the plot as the price tags need
     beyond the space the last date label already holds on the right. Returns the
     ``right`` to fit with again."""
-    _fit_axes(fig)
+    _fit_axes(fig, 1.0, top)
     if not tags:
         return 1.0
     try:
@@ -940,8 +943,46 @@ def _fit_axes_beside(fig: Figure, tags: List[Any]) -> float:
     if over <= 0:
         return 1.0
     right = max(0.6, 1.0 - over / float(fig.bbox.width))
-    _fit_axes(fig, right)
+    _fit_axes(fig, right, top)
     return right
+
+
+def _corner_axis_names(fig: Figure, ax, price_name: str, time_name: str) -> List[Any]:
+    """The axis names in two corners instead of a row and a column of their own: the
+    price name level, above the price labels at the top left; the time name beside the
+    last date at the bottom right. Figure text, so tight_layout leaves them out and
+    the chart keeps room for them itself."""
+    size = rcParams["axes.labelsize"]
+    edge_pt = CHART_PAD * float(rcParams["font.size"])
+    tick_pt = float(rcParams["xtick.major.size"]) + float(rcParams["xtick.major.pad"])
+    above = blended_transform_factory(
+        fig.transFigure, ax.transAxes
+    ) + ScaledTranslation(edge_pt / 72.0, NAME_GAP_PT / 72.0, fig.dpi_scale_trans)
+    beside = ax.transAxes + ScaledTranslation(
+        4 / 72.0, -tick_pt / 72.0, fig.dpi_scale_trans
+    )
+    return [
+        fig.text(
+            0,
+            1,
+            price_name,
+            transform=above,
+            ha="left",
+            va="bottom",
+            color=DARK_FG,
+            fontsize=size,
+        ),
+        fig.text(
+            1,
+            0,
+            time_name,
+            transform=beside,
+            ha="left",
+            va="top",
+            color=DARK_FG,
+            fontsize=size,
+        ),
+    ]
 
 
 def _end_date_inside(ax) -> None:
@@ -1045,9 +1086,10 @@ class CandleChart(ttk.Frame):
         self._base_ylim: Optional[Tuple[float, float]] = None  # candle range + pad
         self._price_tags: List[Any] = []
 
-        # Add axis labels
-        self.ax.set_xlabel("Time", color=DARK_FG)
-        self.ax.set_ylabel(f"{coin}USD", color=DARK_FG)
+        # axis names in the corners (owner, 2026-10-14): fit_layout() keeps room
+        self._price_name, self._time_name = _corner_axis_names(
+            self.fig, self.ax, f"{coin}USD", "Time"
+        )
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         canvas_w = self.canvas.get_tk_widget()
@@ -1108,7 +1150,15 @@ class CandleChart(ttk.Frame):
             art.set_in_layout(False)
         if self._base_ylim:
             ax.set_ylim(*self._base_ylim)
-        right = _fit_axes_beside(fig, self._price_tags)
+        top = 1.0  # a strip above the plot for the price name
+        try:
+            name_px = self._price_name.get_window_extent(fig.canvas.get_renderer())
+            gap_px = NAME_GAP_PT * fig.dpi / 72.0
+            top = 1.0 - (name_px.height + gap_px) / float(fig.bbox.height)
+        except Exception:
+            pass
+        # the time name sits right of the plot, like the price tags
+        right = _fit_axes_beside(fig, self._price_tags + [self._time_name], top)
         if not (self._base_ylim and labels):
             return
         try:
@@ -1118,7 +1168,7 @@ class CandleChart(ttk.Frame):
             ax.set_ylim(*room_for_labels(*self._base_ylim, layer.label_reach(), height))
         except Exception:
             pass
-        _fit_axes(fig, right)  # the new range may change the price labels' width
+        _fit_axes(fig, right, top)  # the new range may change the price labels' width
         layer.keep_labels_inside()
 
     def _fit_and_draw(self) -> None:
@@ -1224,10 +1274,7 @@ class CandleChart(ttk.Frame):
         except Exception:
             # fallback if matplotlib version lacks .clear() on these lists
             self.ax.cla()
-            self._apply_dark_chart_style()
-            # Restore axis labels after clearing
-            self.ax.set_xlabel("Time", color=DARK_FG)
-            self.ax.set_ylabel(f"{self.coin}USD", color=DARK_FG)
+            self._apply_dark_chart_style()  # the axis names are figure text: kept
         self._price_tags = []
         self._base_ylim = None
 
