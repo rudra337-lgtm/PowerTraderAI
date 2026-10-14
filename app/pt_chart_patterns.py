@@ -16,7 +16,7 @@ import queue
 import threading
 import time
 import webbrowser
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import tkinter as tk
 from tkinter import ttk
@@ -35,11 +35,30 @@ LABEL_OFFSET_PT = 12  # label distance from its candle
 LABEL_STEP_PT = 16  # extra distance per stagger level
 LABEL_LEVELS = 4  # stagger levels before labels may overlap again
 LABEL_GAP_BARS = 10  # labels closer than this (in candles) on one side are staggered
+LABEL_FONT_PT = 8
+LABEL_BOX_PAD = 0.3  # label box padding, as a fraction of the font size
+MAX_LABEL_SHARE = 0.4  # most of the plot height one label may claim (tiny charts)
 RETRY_SECONDS = 60.0
 
 
 def _fmt_ts(ts: int) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ts)))
+
+
+def room_for_labels(
+    lo: float, hi: float, reach: Sequence[Tuple[float, bool, float]], height_px: float
+) -> Tuple[float, float]:
+    """The price range (lo, hi), widened only as far as every label needs to sit inside a
+    plot ``height_px`` tall. ``reach``: (price, drawn above it, pixels from that price to
+    the label's far edge)."""
+    if height_px <= 0 or not reach:
+        return lo, hi
+    shares = [(y, up, min(px / height_px, MAX_LABEL_SHARE)) for y, up, px in reach]
+    top, bottom = hi, lo
+    for _ in range(8):  # each edge depends on the other; this settles in a few rounds
+        top = max([hi] + [(y - r * bottom) / (1 - r) for y, up, r in shares if up])
+        bottom = min([lo] + [(y - r * top) / (1 - r) for y, up, r in shares if not up])
+    return bottom, top
 
 
 def binance_closed_bars(coin: str, interval: str, start_ts: int, end_ts: int):
@@ -246,10 +265,61 @@ class PatternLayer:
         self._draw_labels()
         self._restore_hover()
         self._set_status()
+        fit = getattr(self.chart, "fit_layout", None)  # the labels may need more room
         try:
+            if fit is not None:
+                fit()
             self.canvas.draw_idle()
         except Exception:
             pass
+
+    def label_artists(self) -> list:
+        return [rec["artist"] for rec in self.records]
+
+    def keep_labels_inside(self) -> None:
+        """A label that would cross the left or right edge of the plot is aligned to
+        that side of its candle instead of centred on it, so it never covers the price
+        axis or the price tags."""
+        try:
+            renderer = self.canvas.get_renderer()
+            plot = self.ax.get_window_extent(renderer)
+        except Exception:
+            return
+        pad_px = LABEL_BOX_PAD * LABEL_FONT_PT * self.ax.figure.dpi / 72.0
+        for rec in self.records:
+            art = rec["artist"]
+            art.set_horizontalalignment("center")
+            try:
+                box = art.get_window_extent(renderer)
+            except Exception:
+                continue
+            if box.x1 + pad_px > plot.x1:
+                art.set_horizontalalignment("right")
+            elif box.x0 - pad_px < plot.x0:
+                art.set_horizontalalignment("left")
+
+    def label_reach(self) -> List[Tuple[float, bool, float]]:
+        """(price, drawn above it, pixels from that price to the label's far edge) for
+        every label, so the chart can widen its price range until each one is inside the
+        plot."""
+        px_per_pt = self.ax.figure.dpi / 72.0
+        line_px = LABEL_FONT_PT * 1.2 * px_per_pt  # one line of text
+        box_px = 2 * LABEL_BOX_PAD * LABEL_FONT_PT * px_per_pt
+        try:
+            renderer = self.canvas.get_renderer()
+        except Exception:
+            renderer = None
+        out = []
+        for rec in self.records:
+            try:
+                text_px = float(rec["artist"].get_window_extent(renderer).height)
+            except Exception:
+                text_px = 0.0
+            if text_px < line_px / 2:  # not measurable yet
+                text_px = line_px
+            reach = rec["offset_pt"] * px_per_pt + text_px + box_px
+            out.append((rec["y"], rec["up"], reach))
+        return out
 
     @staticmethod
     def _key_of(rec_or_det):
@@ -336,10 +406,10 @@ class PatternLayer:
             textcoords="offset points",
             ha="center",
             va="bottom" if up else "top",
-            fontsize=8,
+            fontsize=LABEL_FONT_PT,
             color=LABEL_FG,
             bbox=dict(
-                boxstyle="round,pad=0.3",
+                boxstyle=f"round,pad={LABEL_BOX_PAD}",
                 facecolor=LABEL_BG,
                 edgecolor=LABEL_EDGE,
                 alpha=0.92,
@@ -354,6 +424,9 @@ class PatternLayer:
                 "x_last": x_last,
                 "x_first": index.get(d.first_ts),
                 "x_context": index.get(d.context_ts),
+                "y": y,
+                "up": up,
+                "offset_pt": offset,
             }
         )
 
@@ -438,6 +511,8 @@ class PatternLayer:
         self._hover_key = self._key_of(rec) if rec is not None else None
         if rec is not None:
             self._draw_hover(rec)
+        for art in self._overlay:
+            art.set_in_layout(False)  # hovering never moves the margins
         try:
             self.canvas.draw_idle()
         except Exception:

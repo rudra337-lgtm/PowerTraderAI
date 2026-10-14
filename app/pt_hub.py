@@ -17,17 +17,19 @@ import tkinter as tk
 import tkinter.font as tkfont
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass
 from decimal import Decimal
 from io import BytesIO
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Dict, List, Optional, Tuple
 
+from matplotlib import rcParams
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter
-from matplotlib.transforms import blended_transform_factory
+from matplotlib.transforms import ScaledTranslation, blended_transform_factory
 
 import chart_settings
 import pt_paths
@@ -348,6 +350,45 @@ def _atomic_write_text(path: str, content: str) -> None:
         os.replace(tmp, path)  # Atomic operation on Windows/Unix
     except Exception:
         pass
+
+
+class ScrollingRow(ttk.Frame):
+    """One row of widgets that scrolls sideways when it is wider than the space it
+    has; the scrollbar shows only then. Children go in ``inner``."""
+
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self._canvas = tk.Canvas(self, highlightthickness=0, bd=0, height=1)
+        try:
+            bg = ttk.Style(self).lookup("TFrame", "background")
+            if bg:
+                self._canvas.configure(bg=bg)
+        except Exception:
+            pass
+        self._bar = ttk.Scrollbar(self, orient="horizontal", command=self._canvas.xview)
+        self._canvas.configure(xscrollcommand=self._bar.set)
+        self.inner = ttk.Frame(self._canvas)
+        self._canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self._canvas.pack(side="top", fill="x")
+        self.inner.bind("<Configure>", self._fit, add="+")
+        self._canvas.bind("<Configure>", self._fit, add="+")
+
+    def add(self, widget: tk.Widget, padx=(0, 0), pady=(0, 0)) -> None:
+        widget.pack(side="left", padx=padx, pady=pady)
+
+    @property
+    def scrolls(self) -> bool:
+        return self._bar.winfo_manager() == "pack"
+
+    def _fit(self, event=None) -> None:
+        width, height = self.inner.winfo_reqwidth(), self.inner.winfo_reqheight()
+        self._canvas.configure(height=height, scrollregion=(0, 0, width, height))
+        need = width > self._canvas.winfo_width() > 1
+        if need and not self.scrolls:
+            self._bar.pack(side="top", fill="x", pady=(0, 4))
+        elif not need and self.scrolls:
+            self._bar.pack_forget()
+            self._canvas.xview_moveto(0)
 
 
 @dataclass
@@ -900,6 +941,99 @@ class CandleFetcher:
 # Chart widget
 # -----------------------------
 
+# Chart margins follow the text actually drawn (title, axis labels, tick labels, price
+# tags). Fixed fractions left a wide, short chart a fifth of its height empty above and
+# below and an eighth of its width at each side.
+CHART_PAD = 0.4  # space round the chart's outer text, as a fraction of the font size
+TAG_FONT_PT = 8  # right-hand price tags (ASK, BID, AVG, DCA, SELL)
+TAG_BOX_PAD = 0.18  # their box padding, as a fraction of the font size
+NAME_GAP_PT = 6  # price name above the plot: clear of a price label on the top tick
+
+
+def _fit_axes(fig: Figure, right: float = 1.0, top: float = 1.0) -> None:
+    """Fit the plot and its axis text into the figure, leaving the share of the width to
+    the right of ``right`` and the share of the height above ``top`` free."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # too small to fit: keep the last layout
+            fig.tight_layout(
+                pad=CHART_PAD, rect=(0.0, 0.0, max(0.5, right), max(0.5, top))
+            )
+    except Exception:
+        pass
+
+
+def _fit_axes_beside(fig: Figure, tags: List[Any], top: float = 1.0) -> float:
+    """Fit the axes, then take only as much width from the plot as the price tags need
+    beyond the space the last date label already holds on the right. Returns the
+    ``right`` to fit with again."""
+    _fit_axes(fig, 1.0, top)
+    if not tags:
+        return 1.0
+    try:
+        renderer = fig.canvas.get_renderer()
+        px_per_pt = fig.dpi / 72.0
+        box_px = TAG_BOX_PAD * TAG_FONT_PT * px_per_pt
+        edge_px = CHART_PAD * float(rcParams["font.size"]) * px_per_pt
+        end = max(t.get_window_extent(renderer).x1 for t in tags) + box_px + edge_px
+        over = end - float(fig.bbox.x1)
+    except Exception:
+        return 1.0
+    if over <= 0:
+        return 1.0
+    right = max(0.6, 1.0 - over / float(fig.bbox.width))
+    _fit_axes(fig, right, top)
+    return right
+
+
+def _corner_axis_names(fig: Figure, ax, price_name: str, time_name: str) -> List[Any]:
+    """The axis names in two corners instead of a row and a column of their own: the
+    price name level, above the price labels at the top left; the time name beside the
+    last date at the bottom right. Figure text, so tight_layout leaves them out and
+    the chart keeps room for them itself."""
+    size = rcParams["axes.labelsize"]
+    edge_pt = CHART_PAD * float(rcParams["font.size"])
+    tick_pt = float(rcParams["xtick.major.size"]) + float(rcParams["xtick.major.pad"])
+    above = blended_transform_factory(
+        fig.transFigure, ax.transAxes
+    ) + ScaledTranslation(edge_pt / 72.0, NAME_GAP_PT / 72.0, fig.dpi_scale_trans)
+    beside = ax.transAxes + ScaledTranslation(
+        4 / 72.0, -tick_pt / 72.0, fig.dpi_scale_trans
+    )
+    return [
+        fig.text(
+            0,
+            1,
+            price_name,
+            transform=above,
+            ha="left",
+            va="bottom",
+            color=DARK_FG,
+            fontsize=size,
+        ),
+        fig.text(
+            1,
+            0,
+            time_name,
+            transform=beside,
+            ha="left",
+            va="top",
+            color=DARK_FG,
+            fontsize=size,
+        ),
+    ]
+
+
+def _end_date_inside(ax) -> None:
+    """The last date label ends at its candle instead of centring on it, so it does not
+    hang past the plot and hold a strip of margin open."""
+    try:
+        labels = ax.get_xticklabels()
+        if len(labels) > 1:
+            labels[-1].set_horizontalalignment("right")
+    except Exception:
+        pass
+
 
 class CandleChart(ttk.Frame):
     def __init__(
@@ -923,59 +1057,21 @@ class CandleChart(ttk.Frame):
         top = ttk.Frame(self)
         top.pack(fill="x", padx=6, pady=6)
 
-        ttk.Label(top, text=f"{coin} chart").pack(side="left")
-
-        ttk.Label(top, text="Timeframe:").pack(side="left", padx=(12, 4))
-        self.tf_combo = ttk.Combobox(
-            top,
-            textvariable=self.timeframe_var,
-            values=self.settings_getter()["timeframes"],
-            state="readonly",
-            width=10,
-        )
-        self.tf_combo.pack(side="left")
-
-        # Debounce rapid timeframe changes so redraws don't stack
+        # No coin name and no timeframe box here (owner, 2026-10-14): the coin
+        # buttons above name the chart, and the hub's Timeframe box at the end of
+        # that row calls set_timeframe().
         self._tf_after_id = None
 
-        def _debounced_tf_change(*_):
-            try:
-                if self._tf_after_id:
-                    self.after_cancel(self._tf_after_id)
-            except Exception:
-                pass
-
-            def _do():
-                # Ask the hub to refresh charts on the next tick (single refresh)
-                try:
-                    self.event_generate("<<TimeframeChanged>>", when="tail")
-                except Exception:
-                    pass
-
-            self._tf_after_id = self.after(120, _do)
-
-        self.tf_combo.bind("<<ComboboxSelected>>", _debounced_tf_change)
-
         self.neural_status_label = ttk.Label(top, text="Neural: N/A")
-        self.neural_status_label.pack(side="left", padx=(12, 0))
+        self.neural_status_label.pack(side="left")
 
         # Candlestick patterns (FDS-CHART-001): a status line (click: list of all
         # detections) and the Chart settings pop-out.
         self.patterns_status_label = ttk.Label(top, text="", cursor="hand2")
         self.patterns_status_label.pack(side="left", padx=(12, 0))
 
-        # cog packed first so it sits at the far right, after "Last:"
-        self.chart_settings_button = ttk.Button(
-            top,
-            text="\u2699",
-            width=3,
-            command=lambda: self.event_generate("<<OpenChartSettings>>", when="tail"),
-        )
-        self.chart_settings_button.pack(side="right", padx=(8, 0))
-        ToolTip(self.chart_settings_button, "Chart settings")
-
-        self.last_update_label = ttk.Label(top, text="Last: N/A")
-        self.last_update_label.pack(side="right")
+        # The Chart settings cog sits at the right end of the hub's tab row, and the
+        # last update time on the chart, at its bottom right (owner, 2026-10-14).
 
         # Figure
         # IMPORTANT: keep a stable DPI and resize the figure to the widget's pixel size.
@@ -983,26 +1079,25 @@ class CandleChart(ttk.Frame):
         # exact right-side blank/covered region you're seeing.
         self.fig = Figure(figsize=(6.5, 3.5), dpi=100)
         self.fig.patch.set_facecolor(DARK_BG)
-
-        # Reserve bottom space so date+time x tick labels are always visible
-        # Also reserve right space so the price labels (Bid/Ask/DCA/Sell) can sit outside the plot.
-        # Also reserve a bit of top space so the title never gets clipped.
-        self.fig.subplots_adjust(bottom=0.20, right=0.87, top=0.8)
+        # margins: fit_layout(), after every refresh and resize
 
         self.ax = self.fig.add_subplot(111)
         self._apply_dark_chart_style()
-        self.ax.set_title(f"{coin}", color=DARK_FG)
+        # no title: the toolbar above already names the coin and the timeframe
+        self._base_ylim: Optional[Tuple[float, float]] = None  # candle range + pad
+        self._price_tags: List[Any] = []
 
-        # Add axis labels
-        self.ax.set_xlabel("Time", color=DARK_FG)
-        self.ax.set_ylabel(f"{coin}USD", color=DARK_FG)
+        # axis names in the corners (owner, 2026-10-14): fit_layout() keeps room
+        self._price_name, self._time_name = _corner_axis_names(
+            self.fig, self.ax, f"{coin}USD", "Time"
+        )
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         canvas_w = self.canvas.get_tk_widget()
         canvas_w.configure(bg=DARK_BG)
 
         # Remove horizontal padding here so the chart widget truly fills the container.
-        canvas_w.pack(fill="both", expand=True, padx=0, pady=(0, 6))
+        canvas_w.pack(fill="both", expand=True, padx=0, pady=0)
 
         # Keep the matplotlib figure EXACTLY the same pixel size as the Tk widget.
         # FigureCanvasTkAgg already sizes its backing PhotoImage to e.width/e.height.
@@ -1031,7 +1126,7 @@ class CandleChart(ttk.Frame):
                         self.after_cancel(self._resize_after_id)
                     except Exception:
                         pass
-                self._resize_after_id = self.after_idle(self.canvas.draw_idle)
+                self._resize_after_id = self.after_idle(self._fit_and_draw)
             except Exception:
                 pass
 
@@ -1042,6 +1137,64 @@ class CandleChart(ttk.Frame):
         from pt_chart_patterns import PatternLayer
 
         self.pattern_layer = PatternLayer(self, status_label=self.patterns_status_label)
+
+    def set_timeframe(self, tf: str) -> None:
+        """Show ``tf``, chosen in the hub's Timeframe box. Rapid changes are debounced
+        so redraws don't stack."""
+        self.timeframe_var.set(tf)
+        try:
+            if self._tf_after_id:
+                self.after_cancel(self._tf_after_id)
+        except Exception:
+            pass
+
+        def _do():
+            # Ask the hub to refresh charts on the next tick (single refresh)
+            try:
+                self.event_generate("<<TimeframeChanged>>", when="tail")
+            except Exception:
+                pass
+
+        self._tf_after_id = self.after(120, _do)
+
+    def fit_layout(self) -> None:
+        """Size the margins to the text actually drawn: the title, axis labels and tick
+        labels, plus a strip on the right while price tags are shown. The pattern labels
+        then go inside the plot, since the margins no longer leave room for them: the
+        price range widens only as far as they need, and a label at either end is
+        aligned inwards."""
+        fig, ax = self.fig, self.ax
+        layer = getattr(self, "pattern_layer", None)
+        labels = layer.label_artists() if layer is not None else []
+        for art in labels + self._price_tags:
+            art.set_in_layout(False)
+        if self._base_ylim:
+            ax.set_ylim(*self._base_ylim)
+        top = 1.0  # a strip above the plot for the price name
+        try:
+            name_px = self._price_name.get_window_extent(fig.canvas.get_renderer())
+            gap_px = NAME_GAP_PT * fig.dpi / 72.0
+            top = 1.0 - (name_px.height + gap_px) / float(fig.bbox.height)
+        except Exception:
+            pass
+        # the time name sits right of the plot, like the price tags
+        right = _fit_axes_beside(fig, self._price_tags + [self._time_name], top)
+        if not (self._base_ylim and labels):
+            return
+        try:
+            from pt_chart_patterns import room_for_labels
+
+            height = float(ax.get_window_extent().height)
+            ax.set_ylim(*room_for_labels(*self._base_ylim, layer.label_reach(), height))
+        except Exception:
+            pass
+        _fit_axes(fig, right, top)  # the new range may change the price labels' width
+        layer.keep_labels_inside()
+
+    def _fit_and_draw(self) -> None:
+        self._resize_after_id = None
+        self.fit_layout()
+        self.canvas.draw_idle()
 
     def _apply_dark_chart_style(self) -> None:
         """Apply dark styling (called on init and after every ax.clear())."""
@@ -1141,14 +1294,22 @@ class CandleChart(ttk.Frame):
         except Exception:
             # fallback if matplotlib version lacks .clear() on these lists
             self.ax.cla()
-            self._apply_dark_chart_style()
-            # Restore axis labels after clearing
-            self.ax.set_xlabel("Time", color=DARK_FG)
-            self.ax.set_ylabel(f"{self.coin}USD", color=DARK_FG)
+            self._apply_dark_chart_style()  # the axis names are figure text: kept
+        self._price_tags = []
+        self._base_ylim = None
 
         if not candles:
-            self.ax.set_title(f"{self.coin} ({tf}) - no candles", color=DARK_FG)
+            self.ax.text(
+                0.5,
+                0.5,
+                f"{self.coin} ({tf}): no candles",
+                transform=self.ax.transAxes,
+                ha="center",
+                va="center",
+                color=DARK_FG,
+            )
             self.pattern_layer.update([], tf, folder, chart_cfg)
+            self.fit_layout()
             self.canvas.draw_idle()
             return
 
@@ -1202,6 +1363,7 @@ class CandleChart(ttk.Frame):
             if not math.isfinite(pad) or pad <= 0:
                 pad = max(abs(y_low) * 0.001, 1e-6)
             self.ax.set_ylim(y_low - pad, y_high + pad)
+            self._base_ylim = (y_low - pad, y_high + pad)
         except Exception:
             pass
 
@@ -1272,48 +1434,18 @@ class CandleChart(ttk.Frame):
         except Exception:
             pass
 
-        # Right-side price labels (so you can read Bid/Ask/AVG/DCA/Sell at a glance)
+        # Right-side price tags (so you can read Bid/Ask/AVG/DCA/Sell at a glance).
+        # Two lines each, name over price, so the strip they need stays narrow.
         try:
             trans = blended_transform_factory(self.ax.transAxes, self.ax.transData)
-            used_y: List[float] = []
             y0, y1 = self.ax.get_ylim()
-            y_pad = max((y1 - y0) * 0.012, 1e-9)
+            # a tag's height in price units, so tags at close prices can be stacked
+            px_per_pt = self.fig.dpi / 72.0
+            tag_px = (2 * 1.2 + 2 * TAG_BOX_PAD) * TAG_FONT_PT * px_per_pt + 2
+            plot_px = max(float(self.ax.get_window_extent().height), 1.0)
+            y_pad = max((y1 - y0) * tag_px / plot_px, (y1 - y0) * 0.012, 1e-9)
 
-            def _label_right(y: Optional[float], tag: str, color: str) -> None:
-                if y is None:
-                    return
-                try:
-                    yy = float(y)
-                    if (not math.isfinite(yy)) or yy <= 0:
-                        return
-                except Exception:
-                    return
-
-                # Nudge labels apart if levels are very close
-                for prev in used_y:
-                    if abs(yy - prev) < y_pad:
-                        yy = prev + y_pad
-                used_y.append(yy)
-
-                self.ax.text(
-                    1.01,
-                    yy,
-                    f"{tag} {_fmt_price(yy)}",
-                    transform=trans,
-                    ha="left",
-                    va="center",
-                    fontsize=8,
-                    color=color,
-                    bbox=dict(
-                        facecolor=DARK_BG2,
-                        edgecolor=color,
-                        boxstyle="round,pad=0.18",
-                        alpha=0.85,
-                    ),
-                    zorder=20,
-                    clip_on=False,
-                )
-
+            wanted = []
             # Map to your terminology: Ask=buy line, Bid=sell line
             for key, y_val, tag, color in (
                 ("ask", current_buy_price, "ASK", "purple"),
@@ -1322,8 +1454,56 @@ class CandleChart(ttk.Frame):
                 ("dca", dca_line_price, "DCA", "red"),
                 ("trail", trail_line, "SELL", "green"),
             ):
-                if show(key):
-                    _label_right(y_val, tag, color)
+                if not show(key) or y_val is None:
+                    continue
+                try:
+                    price = float(y_val)
+                except Exception:
+                    continue
+                if (not math.isfinite(price)) or price <= 0:
+                    continue
+                # A price beyond the plot is tagged at the nearest edge, with an arrow
+                # towards it: its line is off the chart, and the margins are too
+                # narrow to hold the tag where the price would be.
+                yy, arrow = price, ""
+                if price > y1:
+                    yy, arrow = y1, " ▲"
+                elif price < y0:
+                    yy, arrow = y0, " ▼"
+                wanted.append((yy, price, arrow, tag, color))
+
+            # Tags that would overlap are stacked in price order, and the stack
+            # stays within the plot's height: a tag hanging below the plot would
+            # meet the "Time" name beside the last date.
+            wanted.sort(key=lambda w: w[0])
+            low, high = y0 + y_pad / 2, y1 - y_pad / 2
+            ys: List[float] = []
+            for w in wanted:
+                ys.append(max(w[0], low, ys[-1] + y_pad if ys else low))
+            for k in range(len(ys) - 1, -1, -1):
+                ys[k] = min(ys[k], high if k == len(ys) - 1 else ys[k + 1] - y_pad)
+            for yy, (_, price, arrow, tag, color) in zip(ys, wanted):
+                self._price_tags.append(
+                    self.ax.text(
+                        1.01,
+                        yy,
+                        f"{tag}\n{_fmt_price(price)}{arrow}",
+                        transform=trans,
+                        ha="left",
+                        va="center",
+                        multialignment="center",
+                        fontsize=TAG_FONT_PT,
+                        color=color,
+                        bbox=dict(
+                            facecolor=DARK_BG2,
+                            edgecolor=color,
+                            boxstyle=f"round,pad={TAG_BOX_PAD}",
+                            alpha=0.85,
+                        ),
+                        zorder=20,
+                        clip_on=False,
+                    )
+                )
 
         except Exception:
             pass
@@ -1413,8 +1593,6 @@ class CandleChart(ttk.Frame):
 
         self.ax.set_xlim(-0.5, (len(candles) - 0.5) + 0.6)
 
-        self.ax.set_title(f"{self.coin} ({tf})", color=DARK_FG)
-
         # x tick labels (date + time) - evenly spaced, never overlapping duplicates
         n = len(candles)
         want = 5  # keep it readable even when the window is narrow
@@ -1446,6 +1624,7 @@ class CandleChart(ttk.Frame):
             self.ax.set_xticks(tick_x)
             self.ax.set_xticklabels(tick_lbl)
             self.ax.tick_params(axis="x", labelsize=8)
+            _end_date_inside(self.ax)
         except Exception:
             pass
 
@@ -1455,6 +1634,35 @@ class CandleChart(ttk.Frame):
         except Exception:
             pass
 
+        # the neural levels' last update time, on the chart at its bottom right
+        last_ts = None
+        try:
+            if os.path.isfile(low_path):
+                last_ts = os.path.getmtime(low_path)
+            elif os.path.isfile(high_path):
+                last_ts = os.path.getmtime(high_path)
+        except Exception:
+            last_ts = None
+        last = time.strftime("%H:%M:%S", time.localtime(last_ts)) if last_ts else "N/A"
+        self.last_update_text = self.ax.text(
+            0.995,
+            0.015,
+            f"Last: {last}",
+            transform=self.ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=8,
+            color=DARK_FG,
+            bbox=dict(
+                facecolor=DARK_BG2,
+                edgecolor="none",
+                alpha=0.8,
+                boxstyle="round,pad=0.25",
+            ),
+            zorder=22,
+        )
+
+        self.fit_layout()
         self.canvas.draw_idle()
 
         self.neural_status_label.config(
@@ -1464,23 +1672,6 @@ class CandleChart(ttk.Frame):
                 else ""
             )
         )
-
-        # show file update time if possible
-        last_ts = None
-        try:
-            if os.path.isfile(low_path):
-                last_ts = os.path.getmtime(low_path)
-            elif os.path.isfile(high_path):
-                last_ts = os.path.getmtime(high_path)
-        except Exception:
-            last_ts = None
-
-        if last_ts:
-            self.last_update_label.config(
-                text=f"Last: {time.strftime('%H:%M:%S', time.localtime(last_ts))}"
-            )
-        else:
-            self.last_update_label.config(text="Last: N/A")
 
 
 # -----------------------------
@@ -1512,11 +1703,7 @@ class AccountValueChart(ttk.Frame):
 
         self.fig = Figure(figsize=(6.5, 3.5), dpi=100)
         self.fig.patch.set_facecolor(DARK_BG)
-
-        # Reserve bottom space so date+time x tick labels are always visible
-        # Also reserve right space so the price labels (Bid/Ask/DCA/Sell) can sit outside the plot.
-        # Also reserve a bit of top space so the title never gets clipped.
-        self.fig.subplots_adjust(bottom=0.25, right=0.87, top=0.8)
+        # margins: _fit_axes(), after every refresh and resize
 
         self.ax = self.fig.add_subplot(111)
         self._apply_dark_chart_style()
@@ -1531,7 +1718,7 @@ class AccountValueChart(ttk.Frame):
         canvas_w.configure(bg=DARK_BG)
 
         # Remove horizontal padding here so the chart widget truly fills the container.
-        canvas_w.pack(fill="both", expand=True, padx=0, pady=(0, 6))
+        canvas_w.pack(fill="both", expand=True, padx=0, pady=0)
 
         # Keep the matplotlib figure EXACTLY the same pixel size as the Tk widget.
         # FigureCanvasTkAgg already sizes its backing PhotoImage to e.width/e.height.
@@ -1560,11 +1747,16 @@ class AccountValueChart(ttk.Frame):
                         self.after_cancel(self._resize_after_id)
                     except Exception:
                         pass
-                self._resize_after_id = self.after_idle(self.canvas.draw_idle)
+                self._resize_after_id = self.after_idle(self._fit_and_draw)
             except Exception:
                 pass
 
         canvas_w.bind("<Configure>", _on_canvas_configure, add="+")
+
+    def _fit_and_draw(self) -> None:
+        self._resize_after_id = None
+        _fit_axes(self.fig)
+        self.canvas.draw_idle()
 
     def _apply_dark_chart_style(self) -> None:
         try:
@@ -1709,6 +1901,7 @@ class AccountValueChart(ttk.Frame):
         if not points:
             self.ax.set_title("Account Value - no data", color=DARK_FG)
             self.last_update_label.config(text="Last: N/A")
+            _fit_axes(self.fig)
             self.canvas.draw_idle()
             return
 
@@ -1826,6 +2019,7 @@ class AccountValueChart(ttk.Frame):
             self.ax.set_xticks(tick_x)
             self.ax.set_xticklabels(tick_lbl)
             self.ax.tick_params(axis="x", labelsize=8)
+            _end_date_inside(self.ax)
         except Exception:
             pass
 
@@ -1843,6 +2037,7 @@ class AccountValueChart(ttk.Frame):
         except Exception:
             self.last_update_label.config(text="Last: N/A")
 
+        _fit_axes(self.fig)
         self.canvas.draw_idle()
 
 
@@ -2298,13 +2493,17 @@ class PowerTraderHub(tk.Tk):
                 ],
             )
 
-            # Wrapping chart-tab buttons (normal + selected)
+            # Chart-tab buttons (normal + selected), sized to their text: 10 px
+            # from the text to each edge (owner, 2026-10-14) is 7 px of padding
+            # plus the theme's 3 px of border and focus ring. Width 0 drops the
+            # theme's 11-character minimum.
             style.configure(
                 "ChartTab.TButton",
                 background=DARK_BG2,
                 foreground=DARK_FG,
                 bordercolor=DARK_BORDER,
-                padding=(10, 6),
+                padding=(7, 7),
+                width=0,
             )
             style.map(
                 "ChartTab.TButton",
@@ -2318,7 +2517,8 @@ class PowerTraderHub(tk.Tk):
                 background=DARK_PANEL,
                 foreground=DARK_ACCENT,
                 bordercolor=DARK_ACCENT2,
-                padding=(10, 6),
+                padding=(7, 7),
+                width=0,
             )
         except Exception:
             pass
@@ -3112,16 +3312,13 @@ class PowerTraderHub(tk.Tk):
         )
         self._charts_frame = charts_frame
 
-        # Multi-row "tabs" (WrapFrame)
-        self.chart_tabs_bar = WrapFrame(charts_frame)
-        # Keep left padding, remove right padding so tabs can reach the edge
-        self.chart_tabs_bar.pack(fill="x", padx=(6, 0), pady=(6, 0))
+        self._build_chart_tab_row(charts_frame)
 
         # Page container (no ttk.Notebook, so there are NO native tabs to show)
         self.chart_pages_container = ttk.Frame(charts_frame)
         # Keep left padding, remove right padding so charts fill to the edge
-        self.chart_pages_container.pack(
-            fill="both", expand=True, padx=(6, 0), pady=(0, 6)
+        self.chart_pages_container.pack(  # 5 px to the panel's edges
+            fill="both", expand=True, padx=(5, 5), pady=(0, 5)
         )
 
         self._chart_tab_buttons: Dict[str, ttk.Button] = {}
@@ -3153,6 +3350,7 @@ class PowerTraderHub(tk.Tk):
                     )
                 except Exception:
                     pass
+            self._show_chart_timeframe(name)
 
             # Immediately refresh the newly shown coin chart so candles appear right away
             # (even if trader/neural scripts are not running yet).
@@ -3216,7 +3414,7 @@ class PowerTraderHub(tk.Tk):
         self.chart_pages["ACCOUNT"] = acct_page
 
         acct_btn = ttk.Button(
-            self.chart_tabs_bar,
+            self.chart_tabs_bar.inner,
             text="ACCOUNT",
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
@@ -3238,7 +3436,7 @@ class PowerTraderHub(tk.Tk):
             self.chart_pages[coin] = page
 
             btn = ttk.Button(
-                self.chart_tabs_bar,
+                self.chart_tabs_bar.inner,
                 text=coin,
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
@@ -7151,6 +7349,69 @@ Platform: {sys.platform}
         except Exception:
             pass
 
+    def _build_chart_tab_row(self, charts_frame) -> None:
+        """The chart tab row (owner, 2026-10-14): the coin buttons in one row that
+        scrolls sideways when the panel is too narrow for it, and the Timeframe box
+        anchored at the right end, never overlapping the buttons."""
+        row = ttk.Frame(charts_frame)
+        row.pack(fill="x", padx=(5, 5), pady=(6, 0))
+        self._chart_tabs_row = row
+        # the Chart settings cog at the far right, the Timeframe box to its left
+        cog = ttk.Button(
+            row,
+            text="\u2699",
+            style="ChartTab.TButton",
+            command=self.open_chart_settings,
+        )
+        cog.pack(side="right", anchor="n", pady=(0, 6))
+        ToolTip(cog, "Chart settings")
+        self.chart_settings_button = cog
+        box = ttk.Frame(row)
+        ttk.Label(box, text="Timeframe:").pack(side="left", padx=(0, 4))
+        combo = ttk.Combobox(
+            box,
+            values=self._settings_getter()["timeframes"],
+            state="readonly",
+            width=10,
+        )
+        combo.pack(side="left")
+        combo.bind("<<ComboboxSelected>>", self._on_chart_timeframe_selected)
+        self._chart_tf_box, self.chart_tf_combo = box, combo
+        self._pack_chart_tf_box()  # packed first, so the buttons get what is left
+        self.chart_tabs_bar = ScrollingRow(row)
+        self.chart_tabs_bar.pack(side="left", fill="x", expand=True)
+
+    def _pack_chart_tf_box(self) -> None:
+        bar = getattr(self, "chart_tabs_bar", None)
+        before = {"before": bar} if bar is not None and bar.winfo_exists() else {}
+        self._chart_tf_box.pack(
+            side="right", anchor="n", padx=(8, 6), pady=(6, 6), **before
+        )  # level with the buttons, also while the scrollbar shows
+
+    def _show_chart_timeframe(self, name: str) -> None:
+        """The Timeframe box shows the selected coin chart's timeframe. The account
+        chart has none, so the box is hidden there."""
+        box = getattr(self, "_chart_tf_box", None)
+        if box is None:
+            return
+        chart = getattr(self, "charts", {}).get(name)
+        try:
+            if chart is None:
+                box.pack_forget()
+                return
+            self.chart_tf_combo.set(chart.timeframe_var.get())
+            if box.winfo_manager() != "pack":
+                self._pack_chart_tf_box()
+        except Exception:
+            pass
+
+    def _on_chart_timeframe_selected(self, event=None) -> None:
+        chart = getattr(self, "charts", {}).get(
+            getattr(self, "_current_chart_page", "")
+        )
+        if chart is not None:
+            chart.set_timeframe(self.chart_tf_combo.get())
+
     def _rebuild_coin_chart_tabs(self) -> None:
         """
         Ensure the Charts multi-row tab bar + pages match self.coins.
@@ -7167,10 +7428,11 @@ Platform: {sys.platform}
         if selected not in (["ACCOUNT"] + list(self.coins)):
             selected = "ACCOUNT"
 
-        # Destroy existing tab bar + pages container (clean rebuild)
+        # Destroy existing tab row + pages container (clean rebuild)
         try:
-            if hasattr(self, "chart_tabs_bar") and self.chart_tabs_bar.winfo_exists():
-                self.chart_tabs_bar.destroy()
+            row = getattr(self, "_chart_tabs_row", None)
+            if row is not None and row.winfo_exists():
+                row.destroy()
         except Exception:
             pass
 
@@ -7184,11 +7446,12 @@ Platform: {sys.platform}
             pass
 
         # Recreate
-        self.chart_tabs_bar = WrapFrame(charts_frame)
-        self.chart_tabs_bar.pack(fill="x", padx=6, pady=(6, 0))
+        self._build_chart_tab_row(charts_frame)
 
         self.chart_pages_container = ttk.Frame(charts_frame)
-        self.chart_pages_container.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.chart_pages_container.pack(  # 5 px to the panel's edges
+            fill="both", expand=True, padx=(5, 5), pady=(0, 5)
+        )
 
         self._chart_tab_buttons = {}
         self.chart_pages = {}
@@ -7216,6 +7479,7 @@ Platform: {sys.platform}
                     )
                 except Exception:
                     pass
+            self._show_chart_timeframe(name)
 
         self._show_chart_page = _show_page
 
@@ -7224,7 +7488,7 @@ Platform: {sys.platform}
         self.chart_pages["ACCOUNT"] = acct_page
 
         acct_btn = ttk.Button(
-            self.chart_tabs_bar,
+            self.chart_tabs_bar.inner,
             text="ACCOUNT",
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
@@ -7246,7 +7510,7 @@ Platform: {sys.platform}
             self.chart_pages[coin] = page
 
             btn = ttk.Button(
-                self.chart_tabs_bar,
+                self.chart_tabs_bar.inner,
                 text=coin,
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
