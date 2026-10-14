@@ -430,3 +430,17 @@ def test_the_tab_row_scrolls_only_while_its_buttons_do_not_fit():
         assert row.scrolls
     finally:
         root.destroy()
+
+
+def test_the_chart_tab_buttons_are_sized_to_their_text(hub):
+    """Owner, 2026-10-14: 10 px from the text to each edge of the button."""
+    import tkinter.font as tkfont
+
+    style = ttk.Style(hub)
+    font = tkfont.nametofont(
+        style.lookup("ChartTab.TButton", "font") or "TkDefaultFont"
+    )
+    hub.update_idletasks()
+    for text, button in hub._chart_tab_buttons.items():
+        assert abs(button.winfo_reqwidth() - (font.measure(text) + 20)) <= 1, text
+        assert abs(button.winfo_reqheight() - (font.metrics("linespace") + 20)) <= 1

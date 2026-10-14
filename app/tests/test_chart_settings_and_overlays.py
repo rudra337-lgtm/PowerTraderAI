@@ -785,11 +785,30 @@ def test_price_tags_get_a_strip_and_a_price_off_the_plot_is_tagged_at_its_edge(
         assert ax.x1 < box.x0 and box.x1 <= fig.x1  # beside the plot, not cut off
         ends.append(box.x1)
     assert fig.x1 - max(ends) < EDGE_PX  # the strip is as wide as the widest tag
+    # two lines each (name over price), stacked clear of one another in price order
+    assert all(len(t.get_text().split("\n")) == 2 for t in tags.values())
+    order = sorted(tags.values(), key=lambda t: t.get_position()[1])
+    assert [t.get_text().split()[0] for t in order] == [
+        "DCA",
+        "AVG",
+        "BID",
+        "ASK",
+        "SELL",
+    ]
+    for low, high in zip(order, order[1:]):
+        assert (
+            low.get_bbox_patch().get_window_extent().y1
+            <= high.get_bbox_patch().get_window_extent().y0
+        )
     lo, hi = chart.ax.get_ylim()
-    assert tags["DCA"].get_text().endswith("▼")
-    assert tags["DCA"].get_position()[1] == pytest.approx(chart._base_ylim[0])
+    assert tags["DCA"].get_text().endswith("▼")  # at the bottom of the plot
     assert lo <= tags["DCA"].get_position()[1] <= hi
     assert not tags["SELL"].get_text().endswith(("▲", "▼"))  # 102.0: on it
+    time_name = chart._time_name.get_window_extent()
+    for tag in tags.values():  # within the plot's height, clear of the time name
+        box = tag.get_bbox_patch().get_window_extent()
+        assert ax.y0 <= box.y0 and box.y1 <= ax.y1
+        assert not box.overlaps(time_name)
 
 
 def test_a_label_above_the_highest_candle_stays_inside_the_chart(make_chart):

@@ -1444,23 +1444,34 @@ class CandleChart(ttk.Frame):
         except Exception:
             pass
 
-        # Right-side price labels (so you can read Bid/Ask/AVG/DCA/Sell at a glance)
+        # Right-side price tags (so you can read Bid/Ask/AVG/DCA/Sell at a glance).
+        # Two lines each, name over price, so the strip they need stays narrow.
         try:
             trans = blended_transform_factory(self.ax.transAxes, self.ax.transData)
-            used_y: List[float] = []
             y0, y1 = self.ax.get_ylim()
-            y_pad = max((y1 - y0) * 0.012, 1e-9)
+            # a tag's height in price units, so tags at close prices can be stacked
+            px_per_pt = self.fig.dpi / 72.0
+            tag_px = (2 * 1.2 + 2 * TAG_BOX_PAD) * TAG_FONT_PT * px_per_pt + 2
+            plot_px = max(float(self.ax.get_window_extent().height), 1.0)
+            y_pad = max((y1 - y0) * tag_px / plot_px, (y1 - y0) * 0.012, 1e-9)
 
-            def _label_right(y: Optional[float], tag: str, color: str) -> None:
-                if y is None:
-                    return
+            wanted = []
+            # Map to your terminology: Ask=buy line, Bid=sell line
+            for key, y_val, tag, color in (
+                ("ask", current_buy_price, "ASK", "purple"),
+                ("bid", current_sell_price, "BID", "teal"),
+                ("avg", avg_cost_basis, "AVG", "yellow"),
+                ("dca", dca_line_price, "DCA", "red"),
+                ("trail", trail_line, "SELL", "green"),
+            ):
+                if not show(key) or y_val is None:
+                    continue
                 try:
-                    price = float(y)
-                    if (not math.isfinite(price)) or price <= 0:
-                        return
+                    price = float(y_val)
                 except Exception:
-                    return
-
+                    continue
+                if (not math.isfinite(price)) or price <= 0:
+                    continue
                 # A price beyond the plot is tagged at the nearest edge, with an arrow
                 # towards it: its line is off the chart, and the margins are too
                 # narrow to hold the tag where the price would be.
@@ -1469,21 +1480,28 @@ class CandleChart(ttk.Frame):
                     yy, arrow = y1, " ▲"
                 elif price < y0:
                     yy, arrow = y0, " ▼"
+                wanted.append((yy, price, arrow, tag, color))
 
-                # Nudge labels apart if levels are very close
-                for prev in used_y:
-                    if abs(yy - prev) < y_pad:
-                        yy = prev + y_pad
-                used_y.append(yy)
-
+            # Tags that would overlap are stacked in price order, and the stack
+            # stays within the plot's height: a tag hanging below the plot would
+            # meet the "Time" name beside the last date.
+            wanted.sort(key=lambda w: w[0])
+            low, high = y0 + y_pad / 2, y1 - y_pad / 2
+            ys: List[float] = []
+            for w in wanted:
+                ys.append(max(w[0], low, ys[-1] + y_pad if ys else low))
+            for k in range(len(ys) - 1, -1, -1):
+                ys[k] = min(ys[k], high if k == len(ys) - 1 else ys[k + 1] - y_pad)
+            for yy, (_, price, arrow, tag, color) in zip(ys, wanted):
                 self._price_tags.append(
                     self.ax.text(
                         1.01,
                         yy,
-                        f"{tag} {_fmt_price(price)}{arrow}",
+                        f"{tag}\n{_fmt_price(price)}{arrow}",
                         transform=trans,
                         ha="left",
                         va="center",
+                        multialignment="center",
                         fontsize=TAG_FONT_PT,
                         color=color,
                         bbox=dict(
@@ -1496,17 +1514,6 @@ class CandleChart(ttk.Frame):
                         clip_on=False,
                     )
                 )
-
-            # Map to your terminology: Ask=buy line, Bid=sell line
-            for key, y_val, tag, color in (
-                ("ask", current_buy_price, "ASK", "purple"),
-                ("bid", current_sell_price, "BID", "teal"),
-                ("avg", avg_cost_basis, "AVG", "yellow"),
-                ("dca", dca_line_price, "DCA", "red"),
-                ("trail", trail_line, "SELL", "green"),
-            ):
-                if show(key):
-                    _label_right(y_val, tag, color)
 
         except Exception:
             pass
@@ -2485,13 +2492,17 @@ class PowerTraderHub(tk.Tk):
                 ],
             )
 
-            # Wrapping chart-tab buttons (normal + selected)
+            # Chart-tab buttons (normal + selected), sized to their text: 10 px
+            # from the text to each edge (owner, 2026-10-14) is 7 px of padding
+            # plus the theme's 3 px of border and focus ring. Width 0 drops the
+            # theme's 11-character minimum.
             style.configure(
                 "ChartTab.TButton",
                 background=DARK_BG2,
                 foreground=DARK_FG,
                 bordercolor=DARK_BORDER,
-                padding=(10, 6),
+                padding=(7, 7),
+                width=0,
             )
             style.map(
                 "ChartTab.TButton",
@@ -2505,7 +2516,8 @@ class PowerTraderHub(tk.Tk):
                 background=DARK_PANEL,
                 foreground=DARK_ACCENT,
                 bordercolor=DARK_ACCENT2,
-                padding=(10, 6),
+                padding=(7, 7),
+                width=0,
             )
         except Exception:
             pass
