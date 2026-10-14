@@ -507,3 +507,19 @@ def test_the_chart_settings_cog_has_no_visible_border(hub):
     hub.update_idletasks()
     tab = hub._chart_tab_buttons["ACCOUNT"]
     assert cog.winfo_reqheight() == tab.winfo_reqheight()
+
+
+def test_coin_charts_learn_whether_the_trader_is_running(hub, monkeypatch):
+    """ASK/BID are drawn dotted while the trader is stopped, so every coin-chart
+    refresh says whether it runs, by the same rule as the "Trader:" label."""
+    import time
+
+    assert hub._trader_is_running() is False  # no trader started in tests
+    coin = hub.coins[0]
+    seen = []
+    monkeypatch.setattr(hub.charts[coin], "refresh", lambda *a, **k: seen.append(k))
+    hub._show_chart_page(coin)  # refreshes the shown chart on the next tick
+    deadline = time.time() + 2
+    while not seen and time.time() < deadline:
+        hub.update()
+    assert seen and seen[-1].get("trader_running") is False

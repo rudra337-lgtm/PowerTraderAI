@@ -966,6 +966,35 @@ def test_the_pattern_list_has_no_unthemed_strip(tk_root):
     win.destroy()
 
 
+def test_ask_and_bid_lines_are_dotted_while_the_trader_is_stopped(make_chart):
+    """Owner, 2026-10-14: ASK and BID come from the trader, so while it is stopped
+    they are its last prices, drawn dotted. Every other line stays solid."""
+    chart = make_chart(as_candles(down_then_engulfing()))
+
+    def styles(running):
+        chart.refresh(
+            {"BTC": chart.folder},
+            current_buy_price=101.0,
+            current_sell_price=100.8,
+            trail_line=102.0,
+            dca_line_price=98.0,
+            avg_cost_basis=99.5,
+            trader_running=running,
+        )
+        return {
+            line.get_color(): line.get_linestyle()
+            for line in chart.ax.lines
+            if line.get_color() in ("purple", "teal", "yellow", "red", "green")
+            and len(set(line.get_ydata())) == 1  # the level lines, not candle wicks
+        }
+
+    stopped = styles(False)
+    assert stopped["purple"] == ":" and stopped["teal"] == ":"  # ASK, BID
+    assert all(stopped[c] == "-" for c in ("yellow", "red", "green"))  # AVG, DCA, SELL
+    running = styles(True)
+    assert running["purple"] == "-" and running["teal"] == "-"
+
+
 def test_the_coin_chart_shows_no_last_update_time(make_chart):
     """Owner, 2026-10-14: "Last:" was the neural level files' age, not the chart's,
     so it is gone from the chart. The cog moved to the hub's tab row

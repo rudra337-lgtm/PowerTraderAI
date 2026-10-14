@@ -1217,6 +1217,7 @@ class CandleChart(ttk.Frame):
         trail_line: Optional[float] = None,
         dca_line_price: Optional[float] = None,
         avg_cost_basis: Optional[float] = None,
+        trader_running: bool = True,
     ) -> None:
         cfg = self.settings_getter()
         chart_cfg = chart_settings.normalize(cfg.get("chart"))
@@ -1407,7 +1408,9 @@ class CandleChart(ttk.Frame):
         except Exception:
             pass
 
-        # Overlay current ask/bid prices
+        # Overlay current ask/bid prices. They come from the trader, so while it is
+        # stopped they are its last prices, drawn dotted (owner, 2026-10-14).
+        quote_style = "-" if trader_running else ":"
         try:
             if (
                 show("ask")
@@ -1417,6 +1420,7 @@ class CandleChart(ttk.Frame):
                 self.ax.axhline(
                     y=float(current_buy_price),
                     linewidth=1.5,
+                    linestyle=quote_style,
                     color="purple",
                     alpha=0.95,
                 )
@@ -1430,7 +1434,11 @@ class CandleChart(ttk.Frame):
                 and float(current_sell_price) > 0
             ):
                 self.ax.axhline(
-                    y=float(current_sell_price), linewidth=1.5, color="teal", alpha=0.95
+                    y=float(current_sell_price),
+                    linewidth=1.5,
+                    linestyle=quote_style,
+                    color="teal",
+                    alpha=0.95,
                 )
         except Exception:
             pass
@@ -3397,6 +3405,7 @@ class PowerTraderHub(tk.Tk):
                                     trail_line=trail_line,
                                     dca_line_price=dca_line_price,
                                     avg_cost_basis=avg_cost_basis,
+                                    trader_running=self._trader_is_running(),
                                 )
 
                             except Exception:
@@ -6270,6 +6279,7 @@ Platform: {sys.platform}
                 trail_line=trail_line,
                 dca_line_price=dca_line_price,
                 avg_cost_basis=avg_cost_basis,
+                trader_running=self._trader_is_running(),
             )
 
             # Keep the periodic refresh behavior consistent (prevents an immediate full refresh right after this).
@@ -6310,14 +6320,17 @@ Platform: {sys.platform}
             if follow:
                 txt.see("end")
 
+    def _trader_is_running(self) -> bool:
+        """The trader this hub started is alive (the "Trader:" label's rule)."""
+        proc = getattr(getattr(self, "proc_trader", None), "proc", None)
+        return bool(proc and proc.poll() is None)
+
     def _tick(self) -> None:
         # process labels
         neural_running = bool(
             self.proc_neural.proc and self.proc_neural.proc.poll() is None
         )
-        trader_running = bool(
-            self.proc_trader.proc and self.proc_trader.proc.poll() is None
-        )
+        trader_running = self._trader_is_running()
 
         self.lbl_neural.config(text=f"{'running' if neural_running else 'stopped'}")
         self.lbl_trader.config(text=f"{'running' if trader_running else 'stopped'}")
@@ -6496,6 +6509,7 @@ Platform: {sys.platform}
                             trail_line=trail_line,
                             dca_line_price=dca_line_price,
                             avg_cost_basis=avg_cost_basis,
+                            trader_running=self._trader_is_running(),
                         )
                     except Exception:
                         pass
