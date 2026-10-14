@@ -24,6 +24,7 @@ from io import BytesIO
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Dict, List, Optional, Tuple
 
+from matplotlib import rcParams
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
@@ -920,19 +921,38 @@ def _fit_axes(fig: Figure, right: float = 1.0) -> None:
         pass
 
 
-def _tag_strip(fig: Figure, tags: List[Any]) -> float:
-    """Share of the figure width the price tags need: they start 1% of the plot width
-    past its right edge (x = 1.01) and sit in a rounded box."""
+def _fit_axes_beside(fig: Figure, tags: List[Any]) -> float:
+    """Fit the axes, then take only as much width from the plot as the price tags need
+    beyond the space the last date label already holds on the right. Returns the
+    ``right`` to fit with again."""
+    _fit_axes(fig)
     if not tags:
-        return 0.0
+        return 1.0
     try:
         renderer = fig.canvas.get_renderer()
-        widest = max(t.get_window_extent(renderer).width for t in tags)
-        fig_px = float(fig.bbox.width)
-        box_px = 2 * TAG_BOX_PAD * TAG_FONT_PT * fig.dpi / 72.0
-        return min(0.4, (widest + box_px + 0.01 * fig_px + 4) / fig_px)
+        px_per_pt = fig.dpi / 72.0
+        box_px = TAG_BOX_PAD * TAG_FONT_PT * px_per_pt
+        edge_px = CHART_PAD * float(rcParams["font.size"]) * px_per_pt
+        end = max(t.get_window_extent(renderer).x1 for t in tags) + box_px + edge_px
+        over = end - float(fig.bbox.x1)
     except Exception:
-        return 0.0
+        return 1.0
+    if over <= 0:
+        return 1.0
+    right = max(0.6, 1.0 - over / float(fig.bbox.width))
+    _fit_axes(fig, right)
+    return right
+
+
+def _end_date_inside(ax) -> None:
+    """The last date label ends at its candle instead of centring on it, so it does not
+    hang past the plot and hold a strip of margin open."""
+    try:
+        labels = ax.get_xticklabels()
+        if len(labels) > 1:
+            labels[-1].set_horizontalalignment("right")
+    except Exception:
+        pass
 
 
 class CandleChart(ttk.Frame):
@@ -1086,10 +1106,9 @@ class CandleChart(ttk.Frame):
         labels = layer.label_artists() if layer is not None else []
         for art in labels + self._price_tags:
             art.set_in_layout(False)
-        right = 1.0 - _tag_strip(fig, self._price_tags)
         if self._base_ylim:
             ax.set_ylim(*self._base_ylim)
-        _fit_axes(fig, right)
+        right = _fit_axes_beside(fig, self._price_tags)
         if not (self._base_ylim and labels):
             return
         try:
@@ -1525,6 +1544,7 @@ class CandleChart(ttk.Frame):
             self.ax.set_xticks(tick_x)
             self.ax.set_xticklabels(tick_lbl)
             self.ax.tick_params(axis="x", labelsize=8)
+            _end_date_inside(self.ax)
         except Exception:
             pass
 
@@ -1908,6 +1928,7 @@ class AccountValueChart(ttk.Frame):
             self.ax.set_xticks(tick_x)
             self.ax.set_xticklabels(tick_lbl)
             self.ax.tick_params(axis="x", labelsize=8)
+            _end_date_inside(self.ax)
         except Exception:
             pass
 

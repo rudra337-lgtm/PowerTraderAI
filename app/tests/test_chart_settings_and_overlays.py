@@ -669,6 +669,17 @@ def rising_then_hikkake():
     return [cp.Bar(T0 + k * HOUR, *r) for k, r in enumerate(rows)]
 
 
+def many_bars(n=120):
+    """A full chart window: the last candle sits close to the plot's right edge, so a
+    date label centred on it would hang past the plot."""
+    rows = []
+    for k in range(n):
+        c = 100.0 + 5 * math.sin(k / 9)
+        o = 100.0 + 5 * math.sin((k - 1) / 9)
+        rows.append((o, max(o, c) + 0.4, min(o, c) - 0.4, c))
+    return [cp.Bar(T0 + k * HOUR, *r) for k, r in enumerate(rows)]
+
+
 def wide_and_short(chart, w=1200, h=335):
     """The size of the coin chart in the owner's screenshot of 2026-10-14."""
     chart.fig.set_size_inches(w / chart.fig.dpi, h / chart.fig.dpi)
@@ -705,14 +716,15 @@ def test_room_for_labels_widens_the_range_only_as_far_as_the_labels_need():
 def test_the_coin_chart_fills_a_wide_short_area(make_chart):
     """Fixed margins left empty strips round the chart's text: 20% of the height above
     and below the plot, 12.5% of the width on the left and 13% on the right."""
-    chart = make_chart(
-        as_candles(down_then_engulfing()), chart_cfg={"overlays": NO_PRICE_TAGS}
-    )
+    chart = make_chart(as_candles(many_bars()), chart_cfg={"overlays": NO_PRICE_TAGS})
     wide_and_short(chart)
     refresh(chart)
     ax, fig = boxes(chart)
     assert all(0 <= gap < EDGE_PX for gap in edge_gaps(chart))
-    assert fig.x1 - ax.x1 < 0.01 * fig.width  # no price tags, no strip for them
+    assert (
+        fig.x1 - ax.x1 < EDGE_PX
+    )  # no price tags, no strip; the last date ends inside
+    assert chart.ax.get_xticklabels()[-1].get_window_extent().x1 <= ax.x1
 
 
 def test_price_tags_get_a_strip_and_a_price_off_the_plot_is_tagged_at_its_edge(
@@ -724,10 +736,12 @@ def test_price_tags_get_a_strip_and_a_price_off_the_plot_is_tagged_at_its_edge(
     ax, fig = boxes(chart)
     tags = {t.get_text().split()[0]: t for t in chart._price_tags}
     assert set(tags) == {"ASK", "BID", "AVG", "DCA", "SELL"}
+    ends = []
     for tag in tags.values():
-        box = tag.get_window_extent()
+        box = tag.get_bbox_patch().get_window_extent()
         assert ax.x1 < box.x0 and box.x1 <= fig.x1  # beside the plot, not cut off
-    assert fig.x1 - ax.x1 < 0.15 * fig.width
+        ends.append(box.x1)
+    assert fig.x1 - max(ends) < EDGE_PX  # the strip is as wide as the widest tag
     lo, hi = chart.ax.get_ylim()
     assert tags["DCA"].get_text().endswith("▼")
     assert tags["DCA"].get_position()[1] == pytest.approx(chart._base_ylim[0])
@@ -754,6 +768,22 @@ def test_a_label_above_the_highest_candle_stays_inside_the_chart(make_chart):
     assert box.y1 <= ax.y1  # inside the plot, clear of the title
     assert ax.x0 <= box.x0 and box.x1 <= ax.x1  # the last candle's label is aligned in
     assert chart.ax.get_ylim()[1] > chart._base_ylim[1]  # the range grew to make room
+
+
+def test_the_tag_strip_shares_the_space_the_last_date_label_holds(make_chart):
+    """With a full window the last date label hangs right of the plot. The tags sit
+    beside the plot and the label below it, so the strip is not added on top."""
+    chart = make_chart(
+        as_candles(many_bars()),
+        chart_cfg={"overlays": {"avg": False, "dca": False, "trail": False}},
+    )
+    wide_and_short(chart)
+    chart.refresh(
+        {"BTC": chart.folder}, current_buy_price=100.6, current_sell_price=100.4
+    )
+    ax, fig = boxes(chart)
+    ends = [t.get_bbox_patch().get_window_extent().x1 for t in chart._price_tags]
+    assert len(ends) == 2 and fig.x1 - max(ends) < EDGE_PX
 
 
 def test_labels_never_cover_the_price_tags_or_the_price_axis(make_chart):
@@ -804,7 +834,7 @@ def test_the_account_chart_fills_a_wide_short_area(tk_root, tmp_path):
     chart.refresh()
     ax, fig = boxes(chart)
     assert all(0 <= gap < EDGE_PX for gap in edge_gaps(chart))
-    assert fig.x1 - ax.x1 < 0.03 * fig.width  # half the last date label, centred on it
+    assert fig.x1 - ax.x1 < EDGE_PX  # the last date label ends inside the plot
 
 
 # --- the Chart settings pop-out (section 8) ------------------------------------------
