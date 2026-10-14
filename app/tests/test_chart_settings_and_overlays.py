@@ -966,13 +966,21 @@ def test_the_pattern_list_has_no_unthemed_strip(tk_root):
     win.destroy()
 
 
-def test_the_toolbar_cog_is_an_icon_at_the_far_right(make_chart):
-    """Owner request 2026-10-13: cog only, no words, after "Last:"."""
+def test_the_last_update_time_sits_on_the_chart_at_its_bottom_right(make_chart):
+    """Owner, 2026-10-14: moved from the toolbar onto the chart. The cog moved to the
+    hub's tab row (test_hub_layout)."""
     chart = make_chart(as_candles(down_then_engulfing()))
-    button = chart.chart_settings_button
-    assert str(button.cget("text")) == "⚙"
-    right = [w for w in button.master.pack_slaves() if w.pack_info()["side"] == "right"]
-    assert right[:2] == [button, chart.last_update_label]  # first packed = rightmost
+    wide_and_short(chart)
+    refresh(chart)
+    ax, fig = boxes(chart)
+    note = chart.last_update_text
+    assert note in chart.ax.texts and note.get_text().startswith("Last: ")
+    assert note.get_text() != "Last: N/A"  # the test folder has its neural files
+    box = note.get_window_extent()
+    assert ax.x1 - 15 <= box.x1 <= ax.x1 and ax.y0 <= box.y0 <= ax.y0 + 15
+    assert not hasattr(chart, "chart_settings_button")
+    assert not hasattr(chart, "last_update_label")
+    assert chart.canvas.get_tk_widget().pack_info()["pady"] in (0, (0, 0))
 
 
 def test_the_pop_out_opens_from_settings_and_the_toolbar_once(monkeypatch):
@@ -985,7 +993,7 @@ def test_the_pop_out_opens_from_settings_and_the_toolbar_once(monkeypatch):
     try:
         first = hub.open_chart_settings()
         assert hub.open_chart_settings() is first  # one at a time
-        assert hub.bind_all("<<OpenChartSettings>>")  # the chart toolbar button
+        assert hub.bind_all("<<OpenChartSettings>>")
         hub._apply_chart_settings({"overlays": {"trades": False}})
         assert hub.settings["chart"]["overlays"]["trades"] is False
         with open(pt_paths.gui_settings_file(), encoding="utf-8") as f:

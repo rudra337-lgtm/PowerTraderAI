@@ -362,7 +362,8 @@ def test_the_timeframe_box_sits_at_the_right_end_of_the_chart_tab_row(hub):
     hub._show_chart_page(hub.coins[0])  # the hub opens on ACCOUNT, which has none
     row, box = hub._chart_tabs_row, hub._chart_tf_box
     assert isinstance(hub.chart_tabs_bar, pt_hub.ScrollingRow)
-    assert row.pack_slaves()[0] is box  # packed first, so it keeps its room
+    # packed after the cog and before the buttons, so it keeps its room
+    assert row.pack_slaves()[:2] == [hub.chart_settings_button, box]
     assert box.pack_info()["side"] == "right"
     assert all(
         b.master is hub.chart_tabs_bar.inner for b in hub._chart_tab_buttons.values()
@@ -377,7 +378,7 @@ def test_the_timeframe_box_follows_the_selected_coin_chart(hub):
     chart = hub.charts[coin]
     other = [tf for tf in combo.cget("values") if tf != chart.timeframe_var.get()][0]
     hub._show_chart_page(coin)
-    assert box.winfo_manager() == "pack" and hub._chart_tabs_row.pack_slaves()[0] is box
+    assert box.winfo_manager() == "pack" and hub._chart_tabs_row.pack_slaves()[1] is box
     assert combo.get() == chart.timeframe_var.get()
     combo.set(other)
     hub._on_chart_timeframe_selected()
@@ -444,3 +445,25 @@ def test_the_chart_tab_buttons_are_sized_to_their_text(hub):
     for text, button in hub._chart_tab_buttons.items():
         assert abs(button.winfo_reqwidth() - (font.measure(text) + 20)) <= 1, text
         assert abs(button.winfo_reqheight() - (font.metrics("linespace") + 20)) <= 1
+
+
+def test_the_chart_settings_cog_sits_at_the_far_right_of_the_tab_row(hub):
+    """Owner, 2026-10-14: the cog at the far right, the Timeframe box to its left."""
+    cog = hub.chart_settings_button
+    assert str(cog.cget("text")) == "\u2699" and cog.master is hub._chart_tabs_row
+    hub._show_chart_page(hub.coins[0])
+    assert hub._chart_tabs_row.pack_slaves()[:2] == [cog, hub._chart_tf_box]
+    hub._show_chart_page("ACCOUNT")
+    assert hub._chart_tabs_row.pack_slaves()[0] is cog  # Chart settings stays
+    before = set(hub.winfo_children())
+    cog.invoke()
+    opened = [w for w in hub.winfo_children() if w not in before]
+    assert len(opened) == 1  # the Chart settings window
+    opened[0].destroy()
+
+
+def test_the_charts_sit_5px_from_the_panel_edges(hub):
+    """Owner, 2026-10-14: 5 px left, right and bottom."""
+    info = hub.chart_pages_container.pack_info()
+    assert info["padx"] in (5, (5, 5)) and info["pady"] == (0, 5)
+    assert hub._chart_tabs_row.pack_info()["padx"] in (5, (5, 5))

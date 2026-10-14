@@ -1070,18 +1070,8 @@ class CandleChart(ttk.Frame):
         self.patterns_status_label = ttk.Label(top, text="", cursor="hand2")
         self.patterns_status_label.pack(side="left", padx=(12, 0))
 
-        # cog packed first so it sits at the far right, after "Last:"
-        self.chart_settings_button = ttk.Button(
-            top,
-            text="\u2699",
-            width=3,
-            command=lambda: self.event_generate("<<OpenChartSettings>>", when="tail"),
-        )
-        self.chart_settings_button.pack(side="right", padx=(8, 0))
-        ToolTip(self.chart_settings_button, "Chart settings")
-
-        self.last_update_label = ttk.Label(top, text="Last: N/A")
-        self.last_update_label.pack(side="right")
+        # The Chart settings cog sits at the right end of the hub's tab row, and the
+        # last update time on the chart, at its bottom right (owner, 2026-10-14).
 
         # Figure
         # IMPORTANT: keep a stable DPI and resize the figure to the widget's pixel size.
@@ -1107,7 +1097,7 @@ class CandleChart(ttk.Frame):
         canvas_w.configure(bg=DARK_BG)
 
         # Remove horizontal padding here so the chart widget truly fills the container.
-        canvas_w.pack(fill="both", expand=True, padx=0, pady=(0, 6))
+        canvas_w.pack(fill="both", expand=True, padx=0, pady=0)
 
         # Keep the matplotlib figure EXACTLY the same pixel size as the Tk widget.
         # FigureCanvasTkAgg already sizes its backing PhotoImage to e.width/e.height.
@@ -1644,6 +1634,34 @@ class CandleChart(ttk.Frame):
         except Exception:
             pass
 
+        # the neural levels' last update time, on the chart at its bottom right
+        last_ts = None
+        try:
+            if os.path.isfile(low_path):
+                last_ts = os.path.getmtime(low_path)
+            elif os.path.isfile(high_path):
+                last_ts = os.path.getmtime(high_path)
+        except Exception:
+            last_ts = None
+        last = time.strftime("%H:%M:%S", time.localtime(last_ts)) if last_ts else "N/A"
+        self.last_update_text = self.ax.text(
+            0.995,
+            0.015,
+            f"Last: {last}",
+            transform=self.ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=8,
+            color=DARK_FG,
+            bbox=dict(
+                facecolor=DARK_BG2,
+                edgecolor="none",
+                alpha=0.8,
+                boxstyle="round,pad=0.25",
+            ),
+            zorder=22,
+        )
+
         self.fit_layout()
         self.canvas.draw_idle()
 
@@ -1654,23 +1672,6 @@ class CandleChart(ttk.Frame):
                 else ""
             )
         )
-
-        # show file update time if possible
-        last_ts = None
-        try:
-            if os.path.isfile(low_path):
-                last_ts = os.path.getmtime(low_path)
-            elif os.path.isfile(high_path):
-                last_ts = os.path.getmtime(high_path)
-        except Exception:
-            last_ts = None
-
-        if last_ts:
-            self.last_update_label.config(
-                text=f"Last: {time.strftime('%H:%M:%S', time.localtime(last_ts))}"
-            )
-        else:
-            self.last_update_label.config(text="Last: N/A")
 
 
 # -----------------------------
@@ -1717,7 +1718,7 @@ class AccountValueChart(ttk.Frame):
         canvas_w.configure(bg=DARK_BG)
 
         # Remove horizontal padding here so the chart widget truly fills the container.
-        canvas_w.pack(fill="both", expand=True, padx=0, pady=(0, 6))
+        canvas_w.pack(fill="both", expand=True, padx=0, pady=0)
 
         # Keep the matplotlib figure EXACTLY the same pixel size as the Tk widget.
         # FigureCanvasTkAgg already sizes its backing PhotoImage to e.width/e.height.
@@ -3316,8 +3317,8 @@ class PowerTraderHub(tk.Tk):
         # Page container (no ttk.Notebook, so there are NO native tabs to show)
         self.chart_pages_container = ttk.Frame(charts_frame)
         # Keep left padding, remove right padding so charts fill to the edge
-        self.chart_pages_container.pack(
-            fill="both", expand=True, padx=(6, 0), pady=(0, 6)
+        self.chart_pages_container.pack(  # 5 px to the panel's edges
+            fill="both", expand=True, padx=(5, 5), pady=(0, 5)
         )
 
         self._chart_tab_buttons: Dict[str, ttk.Button] = {}
@@ -7353,8 +7354,18 @@ Platform: {sys.platform}
         scrolls sideways when the panel is too narrow for it, and the Timeframe box
         anchored at the right end, never overlapping the buttons."""
         row = ttk.Frame(charts_frame)
-        row.pack(fill="x", padx=(6, 0), pady=(6, 0))
+        row.pack(fill="x", padx=(5, 5), pady=(6, 0))
         self._chart_tabs_row = row
+        # the Chart settings cog at the far right, the Timeframe box to its left
+        cog = ttk.Button(
+            row,
+            text="\u2699",
+            style="ChartTab.TButton",
+            command=self.open_chart_settings,
+        )
+        cog.pack(side="right", anchor="n", pady=(0, 6))
+        ToolTip(cog, "Chart settings")
+        self.chart_settings_button = cog
         box = ttk.Frame(row)
         ttk.Label(box, text="Timeframe:").pack(side="left", padx=(0, 4))
         combo = ttk.Combobox(
@@ -7374,7 +7385,7 @@ Platform: {sys.platform}
         bar = getattr(self, "chart_tabs_bar", None)
         before = {"before": bar} if bar is not None and bar.winfo_exists() else {}
         self._chart_tf_box.pack(
-            side="right", anchor="n", padx=(8, 6), pady=(4, 6), **before
+            side="right", anchor="n", padx=(8, 6), pady=(6, 6), **before
         )  # level with the buttons, also while the scrollbar shows
 
     def _show_chart_timeframe(self, name: str) -> None:
@@ -7438,7 +7449,9 @@ Platform: {sys.platform}
         self._build_chart_tab_row(charts_frame)
 
         self.chart_pages_container = ttk.Frame(charts_frame)
-        self.chart_pages_container.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.chart_pages_container.pack(  # 5 px to the panel's edges
+            fill="both", expand=True, padx=(5, 5), pady=(0, 5)
+        )
 
         self._chart_tab_buttons = {}
         self.chart_pages = {}
