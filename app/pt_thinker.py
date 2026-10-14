@@ -731,7 +731,7 @@ def _mark_unavailable(sym: str, reason) -> None:
     if _UNAVAILABLE_PRINTED.get(sym) != str(reason):
         print(
             f"Skipping {sym}: {reason}. It gets no signals, and the trader makes no "
-            "buys in it. It is checked again every hour; remove it from Coins in "
+            "buys in it. It is checked again every hour. Remove it from Coins in "
             "Settings if it is gone for good."
         )
         sys.stdout.flush()
