@@ -20,6 +20,7 @@ if APP_DIR not in sys.path:
 
 import candlestick_patterns as cp  # noqa: E402
 import chart_settings as cs  # noqa: E402
+import ui_tokens  # noqa: E402
 from test_candlestick_patterns import NOT_ON_SCREEN  # noqa: E402
 from market_data import listing  # noqa: E402
 
@@ -437,19 +438,23 @@ def refresh(chart):
     )
 
 
+LINES = ui_tokens.CHART_LINES
 OVERLAY_MARKS = {  # key -> (line colour, right-edge label prefix)
-    "neural_long": ("blue", None),
-    "neural_short": ("orange", None),
-    "ask": ("purple", "ASK"),
-    "bid": ("teal", "BID"),
-    "avg": ("yellow", "AVG"),
-    "dca": ("red", "DCA"),
-    "trail": ("green", "SELL"),
+    "neural_long": (LINES["neural_long"], None),
+    "neural_short": (LINES["neural_short"], None),
+    "ask": (LINES["ask"], "ASK"),
+    "bid": (LINES["bid"], "BID"),
+    "avg": (LINES["avg"], "AVG"),
+    "dca": (LINES["dca"], "DCA"),
+    "trail": (LINES["trail"], "SELL"),
 }
 
 
 def drawn(chart):
-    lines = {line.get_color() for line in chart.ax.lines}
+    # level lines are horizontal; candle wicks (one is the DCA line's red) are not
+    lines = {
+        line.get_color() for line in chart.ax.lines if len(set(line.get_ydata())) == 1
+    }
     texts = [t.get_text() for t in chart.ax.texts]
     out = {}
     for key, (colour, prefix) in OVERLAY_MARKS.items():
@@ -981,18 +986,19 @@ def test_ask_and_bid_lines_are_dotted_while_the_trader_is_stopped(make_chart):
             avg_cost_basis=99.5,
             trader_running=running,
         )
+        levels = {LINES[k]: k for k in ("ask", "bid", "avg", "dca", "trail")}
         return {
-            line.get_color(): line.get_linestyle()
+            levels[line.get_color()]: line.get_linestyle()
             for line in chart.ax.lines
-            if line.get_color() in ("purple", "teal", "yellow", "red", "green")
+            if line.get_color() in levels
             and len(set(line.get_ydata())) == 1  # the level lines, not candle wicks
         }
 
     stopped = styles(False)
-    assert stopped["purple"] == ":" and stopped["teal"] == ":"  # ASK, BID
-    assert all(stopped[c] == "-" for c in ("yellow", "red", "green"))  # AVG, DCA, SELL
+    assert stopped["ask"] == ":" and stopped["bid"] == ":"
+    assert all(stopped[k] == "-" for k in ("avg", "dca", "trail"))
     running = styles(True)
-    assert running["purple"] == "-" and running["teal"] == "-"
+    assert running["ask"] == "-" and running["bid"] == "-"
 
 
 def test_the_coin_chart_shows_no_last_update_time(make_chart):

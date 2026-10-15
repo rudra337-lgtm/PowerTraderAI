@@ -16,6 +16,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Callable, List, Optional
 
+import ui_tokens
 from trading_mode import (
     LIVE_CONFIRM_TEXT,
     TESTNET_BROKERS,
@@ -25,9 +26,9 @@ from trading_mode import (
     can_apply,
 )
 
-PAPER_BG, PAPER_FG = "#FFC400", "#0A1B3A"
-LIVE_BG, LIVE_FG = "#B00020", "#FFFFFF"
-TESTNET_BG, TESTNET_FG = "#E67E00", "#FFFFFF"
+PAPER_BG, PAPER_FG = ui_tokens.BANNER["paper"]
+LIVE_BG, LIVE_FG = ui_tokens.BANNER["live"]
+TESTNET_BG, TESTNET_FG = ui_tokens.BANNER["testnet"]
 
 
 def pack_at_top(widget: tk.Misc, parent: tk.Misc) -> None:
@@ -49,7 +50,7 @@ class TradingModeIndicator(tk.Label):
     def __init__(self, parent: tk.Misc, settings: TradingSettings) -> None:
         super().__init__(
             parent,
-            font=("Segoe UI", 11, "bold"),
+            font=ui_tokens.font("subtitle", "bold"),
             anchor="w",
             padx=14,
             pady=3,
