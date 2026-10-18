@@ -462,6 +462,71 @@ def test_classic_widgets_take_the_palette(tk_root):
         frame.destroy()
 
 
+CLASSIC_TEXT_WIDGETS = {"Label", "Button", "Text", "Entry", "Listbox", "Message"}
+
+
+@pytest.mark.parametrize("module", UI_MODULES)
+def test_a_classic_widget_that_sets_its_background_sets_its_text_colour(module):
+    """The default text colour comes from the theme's option database, so a widget
+    that paints its own background picks its text colour too: the dependency
+    labels were black on PANEL (1.1:1) in a window run on its own."""
+    import ast
+
+    missing = []
+    for node in ast.walk(ast.parse(_source(module))):
+        func = getattr(node, "func", None)
+        if not (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "tk"
+            and func.attr in CLASSIC_TEXT_WIDGETS
+        ):
+            continue
+        options = {k.arg for k in node.keywords}
+        if options & {"bg", "background"} and not options & {"fg", "foreground"}:
+            missing.append((func.attr, node.lineno))
+    assert not missing
+
+
+@pytest.mark.parametrize("module", FEATURE_MODULES)
+def test_a_feature_window_run_on_its_own_builds_a_themed_root(module):
+    """A bare tk.Tk() has no option database: the institutional event log was
+    light text on white and its titles plain labels."""
+    source = _source(module)
+    assert "tk.Tk()" not in source
+    if "__main__" in source:
+        assert "ui_theme.themed_root()" in source
+
+
+def test_a_themed_root_looks_like_the_hub():
+    import tkinter as tk
+    from tkinter import ttk
+
+    import ui_theme
+
+    root, error = None, None
+    for _ in range(10):  # Tk sometimes fails to read init.tcl on the first try
+        try:
+            root = ui_theme.themed_root()
+            break
+        except tk.TclError as exc:
+            error = exc
+    if root is None:
+        pytest.skip(f"Tk not available: {error}")
+    root.withdraw()
+    p = ui_tokens.DARK
+    try:
+        log = tk.Text(root)
+        assert str(log.cget("background")).upper() == p["PANEL"].upper()
+        assert str(log.cget("foreground")).upper() == p["FG"].upper()
+        assert str(tk.Label(root).cget("foreground")).upper() == p["FG"].upper()
+        style = ttk.Style(root)
+        assert style.lookup("Title.TLabel", "font")
+        assert style.lookup("Header.TLabel", "font")
+    finally:
+        root.destroy()
+
+
 def test_theme_figure_gives_charts_the_chart_surfaces():
     from matplotlib.colors import to_hex
     from matplotlib.figure import Figure

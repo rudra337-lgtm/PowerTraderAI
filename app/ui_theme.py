@@ -27,6 +27,9 @@ Classic Tk widgets (tk.Frame, tk.Label, tk.Entry ...) read their colours from
 the option database when created; install_classic_defaults() fills it, so they
 match the ttk widgets without colours of their own. theme_figure() gives a
 matplotlib figure the chart surfaces from ui_tokens.CHART.
+
+A feature window run on its own builds its root with themed_root(), so it looks
+as it does inside the hub.
 """
 
 import tkinter as tk
@@ -120,6 +123,16 @@ def install_classic_defaults(root: tk.Misc, p: Dict[str, str]) -> None:
         root.option_add("*Menu.activeForeground", p["SELECT_FG"])
     except tk.TclError:
         pass
+
+
+def themed_root() -> tk.Tk:
+    """The root window for a feature window run on its own (python x_gui.py),
+    themed like the hub's dark mode. A bare tk.Tk() has no option database, so
+    classic widgets keep Tk's white and black, and the named label styles fall
+    back to plain labels."""
+    root = tk.Tk()
+    apply_theme(root, ttk.Style(root), ui_tokens.DARK)
+    return root
 
 
 def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:

@@ -96,7 +96,7 @@ class ExchangeConfigGUI:
         if parent:
             self.window = tk.Toplevel(parent)
         else:
-            self.window = tk.Tk()
+            self.window = ui_theme.themed_root()
 
         self.window.title("PowerTrader AI - Exchange Configuration")
         self.window.geometry("1000x800")
@@ -104,9 +104,7 @@ class ExchangeConfigGUI:
 
         # Opened from the hub, the window takes the hub's palette (dark, or blue in
         # paper mode): ttk styles are shared by the whole process, so it never
-        # configures them itself. Run on its own, it builds the dark theme.
-        if not parent:
-            ui_theme.apply_theme(self.window, ttk.Style(self.window), ui_tokens.DARK)
+        # configures them itself. Run on its own, its root has the dark theme.
         self.p = ui_theme.active_palette()
         self.window.configure(bg=self.p["BG"])
 

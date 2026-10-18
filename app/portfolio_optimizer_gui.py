@@ -41,7 +41,7 @@ class PortfolioOptimizerGUI:
     def __init__(self, parent=None):
         """Initialize the Portfolio Optimizer GUI."""
         if parent is None:
-            self.root = tk.Tk()
+            self.root = ui_theme.themed_root()
             self.root.title("Portfolio Optimization Engine")
             self.root.geometry("1200x800")
         else:
@@ -98,6 +98,7 @@ class PortfolioOptimizerGUI:
             text="python app/install_optional_deps.py",
             font=ui_tokens.mono("body"),
             background=p["PANEL"],
+            foreground=p["FG"],
         ).pack(pady=5)
 
         tk.Label(
@@ -995,7 +996,7 @@ class PortfolioOptimizerGUI:
 
 def main():
     """Run the Portfolio Optimizer GUI."""
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     app = PortfolioOptimizerGUI(root)
     root.mainloop()
 
