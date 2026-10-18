@@ -611,6 +611,26 @@ def test_theme_figure_gives_charts_the_chart_surfaces():
     assert to_hex(ax.get_legend().get_texts()[0].get_color()) == c["text"].lower()
 
 
+def test_theme_figure_keeps_a_title_or_axis_label_given_its_own_colour():
+    """It recoloured the title and axis labels whatever their colour."""
+    from matplotlib.colors import to_hex
+    from matplotlib.figure import Figure
+
+    import ui_theme
+
+    bad, good = ui_tokens.STATUS["bad"], ui_tokens.STATUS["good"]
+    fig = Figure()
+    ax = fig.add_subplot()
+    ax.plot([1, 2], [3, 4])
+    ax.set_title("Loss", color=bad)
+    ax.set_ylabel("Equity", color=good)  # coloured like its series
+    ax.set_xlabel("Date")
+    ui_theme.theme_figure(fig)
+    assert to_hex(ax.title.get_color()) == bad.lower()
+    assert to_hex(ax.yaxis.label.get_color()) == good.lower()
+    assert to_hex(ax.xaxis.label.get_color()) == ui_tokens.CHART["text"].lower()
+
+
 # --- the hub --------------------------------------------------------------------------
 
 

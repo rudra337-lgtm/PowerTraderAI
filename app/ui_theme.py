@@ -437,26 +437,28 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
 def theme_figure(fig) -> None:
     """Give a matplotlib figure the chart surfaces from ui_tokens.CHART: the same
     dark plot in both modes, light text, quiet spines. Call it after the axes are
-    drawn and before canvas.draw(). Text given its own colour keeps it."""
+    drawn and before canvas.draw(). Titles, axis labels, annotations and legend
+    text at matplotlib's default colour take the chart's text colour; text given a
+    colour of its own keeps it. Ticks and spines always take the chart colours."""
     from matplotlib.colors import to_hex
     from matplotlib import rcParams
 
     c = ui_tokens.CHART
-    default_text = to_hex(rcParams["text.color"])
+    defaults = {to_hex(rcParams["text.color"]), to_hex(rcParams["axes.labelcolor"])}
+    if rcParams["axes.titlecolor"] != "auto":
+        defaults.add(to_hex(rcParams["axes.titlecolor"]))
     fig.patch.set_facecolor(c["figure"])
     for ax in fig.axes:
         ax.set_facecolor(c["plot"])
         ax.tick_params(colors=c["text"])
-        for label in (ax.title, ax.xaxis.label, ax.yaxis.label):
-            label.set_color(c["text"])
-        for text in ax.texts:  # annotations and pie labels
-            if to_hex(text.get_color()) == default_text:
-                text.set_color(c["text"])
+        texts = [ax.title, ax.xaxis.label, ax.yaxis.label, *ax.texts]  # + pie labels
         for spine in ax.spines.values():
             spine.set_color(c["grid"])
         legend = ax.get_legend()
         if legend is not None:
             legend.get_frame().set_facecolor(c["label_bg"])
             legend.get_frame().set_edgecolor(c["grid"])
-            for text in legend.get_texts():
+            texts += legend.get_texts()
+        for text in texts:
+            if to_hex(text.get_color()) in defaults:
                 text.set_color(c["text"])
