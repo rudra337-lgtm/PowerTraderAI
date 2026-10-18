@@ -49,23 +49,26 @@ def test_core_functionality():
     try:
         app = PowerTraderHub()
         app.withdraw()  # Hide window
+        try:
+            # Check tabbed interface
+            assert hasattr(app, "bottom_notebook"), "Tabbed notebook missing"
+            assert len(app.bottom_notebook.tabs()) >= 3, "Not enough tabs"
+            assert hasattr(app, "lth_tree"), "LTH table missing"
+            assert hasattr(app, "hist_filter_var"), "History filter missing"
 
-        # Check tabbed interface
-        assert hasattr(app, "bottom_notebook"), "Tabbed notebook missing"
-        assert len(app.bottom_notebook.tabs()) >= 3, "Not enough tabs"
-        assert hasattr(app, "lth_tree"), "LTH table missing"
-        assert hasattr(app, "hist_filter_var"), "History filter missing"
+            # Get tab names; the labels wrap onto two lines, so fold the break
+            tab_names = []
+            for tab_id in app.bottom_notebook.tabs():
+                text = app.bottom_notebook.tab(tab_id, "text")
+                tab_names.append(" ".join(text.split()))
 
-        # Get tab names
-        tab_names = []
-        for tab_id in app.bottom_notebook.tabs():
-            tab_names.append(app.bottom_notebook.tab(tab_id, "text"))
-
-        expected = ["Current Trades", "Long-term Holdings", "Trade History"]
-        for exp_tab in expected:
-            assert exp_tab in tab_names, f"Missing tab: {exp_tab}"
-
-        app.destroy()
+            expected = ["Current Trades", "Long-term Holdings", "Trade History"]
+            for exp_tab in expected:
+                assert exp_tab in tab_names, f"Missing tab: {exp_tab}"
+        finally:
+            # A hub left alive stays Tk's default root: Tk variables made later
+            # without a master would bind to it, not to the next test's hub.
+            app.destroy()
         print("✅ Tabbed interface working perfectly")
         print(f"   • Found tabs: {', '.join(tab_names)}")
         test_results.append(True)

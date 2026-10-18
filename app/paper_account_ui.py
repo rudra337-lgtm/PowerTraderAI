@@ -25,6 +25,7 @@ from tkinter import ttk
 from typing import Callable, Dict, Iterable, Optional, Tuple
 
 import trading_mode as tm
+import ui_tokens
 
 TITLE = "Paper Account"
 STOP_THE_TRADER = "Stop the trader first"
@@ -104,14 +105,14 @@ class PaperAccountDialog(tk.Toplevel):
 
     # -- layout --
     def _build(self) -> None:
-        body = ttk.Frame(self, padding=14)
+        body = ttk.Frame(self, padding=12)
         body.grid(row=0, column=0, sticky="nsew")
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         body.columnconfigure(1, weight=1)
 
         ttk.Label(
-            body, text="Paper trading account", font=("TkDefaultFont", 10, "bold")
+            body, text="Paper trading account", font=ui_tokens.font("body", "bold")
         ).grid(row=0, column=0, columnspan=3, sticky="w")
         ttk.Label(body, textvariable=self.status_var, wraplength=560).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(4, 10)
@@ -134,7 +135,7 @@ class PaperAccountDialog(tk.Toplevel):
             row=3, column=2, sticky="w", padx=(10, 0)
         )
 
-        ttk.Label(body, text="Positions", font=("TkDefaultFont", 10, "bold")).grid(
+        ttk.Label(body, text="Positions", font=ui_tokens.font("body", "bold")).grid(
             row=4, column=0, columnspan=3, sticky="w", pady=(12, 4)
         )
         columns = ("symbol", "quantity", "price", "cost")
@@ -187,7 +188,7 @@ class PaperAccountDialog(tk.Toplevel):
         )
 
         buttons = ttk.Frame(body)
-        buttons.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        buttons.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(12, 0))
         ttk.Button(buttons, text="Reset...", command=self.reset).pack(side="left")
         ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
         self.save_button = ttk.Button(buttons, text="Save", command=self.save)

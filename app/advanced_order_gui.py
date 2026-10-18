@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 from tkinter import messagebox, simpledialog, ttk
 from typing import Any, Dict, List, Optional
 
+import ui_theme
+import ui_tokens
+
 try:
     from advanced_order_automation import (
         AdvancedOrder,
@@ -26,21 +29,6 @@ try:
 except ImportError:
     AUTOMATION_AVAILABLE = False
     print("Warning: Advanced order automation not available.")
-
-# Dark theme colors
-DARK_BG = "#070B10"
-DARK_BG2 = "#0B1220"
-DARK_PANEL = "#0E1626"
-DARK_PANEL2 = "#121C2F"
-DARK_BORDER = "#243044"
-DARK_FG = "#C7D1DB"
-DARK_MUTED = "#8B949E"
-DARK_ACCENT = "#00FF66"
-DARK_ACCENT2 = "#00E5FF"
-DARK_SELECT_BG = "#17324A"
-DARK_SELECT_FG = "#00FF66"
-DARK_ERROR = "#FF4757"
-DARK_WARNING = "#FFA502"
 
 
 class AdvancedOrderGUI:
@@ -102,18 +90,22 @@ class AdvancedOrderGUI:
         frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         ttk.Label(
-            frame, text="Advanced Order Types & Automation", font=("Arial", 16, "bold")
+            frame,
+            text="Advanced Order Types & Automation",
+            font=ui_tokens.font("display", "bold"),
         ).pack(pady=20)
 
         ttk.Label(
             frame,
             text="⚠️ Advanced order automation not available",
-            foreground=DARK_WARNING,
-            font=("Arial", 12),
+            style="Warn.TLabel",
+            font=ui_tokens.font("title"),
         ).pack(pady=10)
 
         ttk.Label(
-            frame, text="Required for advanced order types:", font=("Arial", 10, "bold")
+            frame,
+            text="Required for advanced order types:",
+            font=ui_tokens.font("body", "bold"),
         ).pack(pady=5)
 
         deps = [
@@ -122,19 +114,20 @@ class AdvancedOrderGUI:
             "Threading support",
         ]
         for dep in deps:
-            ttk.Label(frame, text=f"• {dep}", foreground=DARK_ERROR).pack()
+            ttk.Label(frame, text=f"• {dep}", style="Bad.TLabel").pack()
 
         ttk.Label(
             frame,
             text="Install missing dependencies to enable advanced order features",
-            foreground=DARK_MUTED,
-            font=("Arial", 10),
+            style="Muted.TLabel",
+            font=ui_tokens.font("body"),
         ).pack(pady=10)
 
     def setup_creation_tab(self):
         """Setup order creation tab"""
+        p = ui_theme.active_palette()
         # Create scrollable frame
-        canvas = tk.Canvas(self.creation_tab, bg=DARK_BG)
+        canvas = tk.Canvas(self.creation_tab, bg=p["BG"])
         scrollbar = ttk.Scrollbar(
             self.creation_tab, orient="vertical", command=canvas.yview
         )
@@ -266,14 +259,7 @@ class AdvancedOrderGUI:
         details_frame = ttk.LabelFrame(self.orders_tab, text="Order Details")
         details_frame.pack(fill="x", padx=5, pady=5)
 
-        self.details_text = tk.Text(
-            details_frame,
-            height=8,
-            width=80,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-        )
+        self.details_text = tk.Text(details_frame, height=8, width=80)
         details_scrollbar = ttk.Scrollbar(
             details_frame, orient="vertical", command=self.details_text.yview
         )
@@ -328,14 +314,7 @@ class AdvancedOrderGUI:
         rule_details_frame = ttk.LabelFrame(self.automation_tab, text="Rule Details")
         rule_details_frame.pack(fill="x", padx=10, pady=5)
 
-        self.rule_details_text = tk.Text(
-            rule_details_frame,
-            height=6,
-            width=80,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-        )
+        self.rule_details_text = tk.Text(rule_details_frame, height=6, width=80)
         rule_details_scrollbar = ttk.Scrollbar(
             rule_details_frame, orient="vertical", command=self.rule_details_text.yview
         )
@@ -1002,9 +981,10 @@ class AdvancedOrderGUI:
             self.orders_tree.insert("", "end", values=values, tags=tags)
 
         # Configure tag colors
-        self.orders_tree.tag_configure("pending", foreground=DARK_WARNING)
-        self.orders_tree.tag_configure("filled", foreground=DARK_ACCENT)
-        self.orders_tree.tag_configure("cancelled", foreground=DARK_MUTED)
+        p = ui_theme.active_palette()
+        self.orders_tree.tag_configure("pending", foreground=ui_tokens.STATUS["warn"])
+        self.orders_tree.tag_configure("filled", foreground=ui_tokens.STATUS["good"])
+        self.orders_tree.tag_configure("cancelled", foreground=p["MUTED"])
 
     def on_order_select(self, event):
         """Handle order selection"""
@@ -1149,18 +1129,20 @@ if not AUTOMATION_AVAILABLE:
             ttk.Label(
                 frame,
                 text="Advanced Order Types & Automation",
-                font=("Arial", 16, "bold"),
+                font=ui_tokens.font("display", "bold"),
             ).pack(pady=20)
 
             ttk.Label(
                 frame,
                 text="⚠️ Advanced order automation not available",
-                foreground=DARK_WARNING,
-                font=("Arial", 12),
+                style="Warn.TLabel",
+                font=ui_tokens.font("title"),
             ).pack(pady=10)
 
             ttk.Label(
-                frame, text="Missing dependencies:", font=("Arial", 10, "bold")
+                frame,
+                text="Missing dependencies:",
+                font=ui_tokens.font("body", "bold"),
             ).pack(pady=5)
 
             deps = [
@@ -1169,11 +1151,11 @@ if not AUTOMATION_AVAILABLE:
                 "Threading support",
             ]
             for dep in deps:
-                ttk.Label(frame, text=f"• {dep}", foreground=DARK_ERROR).pack()
+                ttk.Label(frame, text=f"• {dep}", style="Bad.TLabel").pack()
 
             ttk.Label(
                 frame,
                 text="Install missing dependencies to enable advanced order features",
-                foreground=DARK_MUTED,
-                font=("Arial", 10),
+                style="Muted.TLabel",
+                font=ui_tokens.font("body"),
             ).pack(pady=10)

@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from tkinter import messagebox, scrolledtext, ttk
 from typing import Any, Dict, List, Optional
 
+import ui_tokens
+
 try:
     from llm_research_engine import (
         AnalysisType,
@@ -150,7 +152,7 @@ class ResearchEngineGUI:
                 ttk.Label(
                     self.research_frame,
                     text="LLM Research Engine Dependencies Missing\n\nRequired modules:\n- OpenAI Python library\n- SQLAlchemy (optional)\n\nInstall with: pip install openai sqlalchemy",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 return
@@ -190,7 +192,7 @@ class ResearchEngineGUI:
             self.engine_status = ttk.Label(
                 self.status_bar,
                 text="Engine: " + ("Available" if self.engine else "Not Available"),
-                foreground="green" if self.engine else "red",
+                style="Good.TLabel" if self.engine else "Bad.TLabel",
             )
             self.engine_status.pack(side=tk.RIGHT)
 
@@ -201,7 +203,7 @@ class ResearchEngineGUI:
                 ttk.Label(
                     self.research_frame,
                     text=f"LLM Research GUI Error\n\n{str(e)}\n\nCheck console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except:
@@ -222,7 +224,9 @@ class ResearchEngineGUI:
             symbol_frame.pack(fill=tk.X, padx=5, pady=2)
 
             ttk.Label(symbol_frame, text="Symbols:").pack(side=tk.LEFT)
-            self.symbol_entry = ttk.Entry(symbol_frame, width=50, font=("Consolas", 9))
+            self.symbol_entry = ttk.Entry(
+                symbol_frame, width=50, font=ui_tokens.mono("small")
+            )
             self.symbol_entry.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
             self.symbol_entry.insert(0, "BTCUSDT,ETHUSDT,ADAUSDT,BNBUSDT,XRPUSDT")
 
@@ -308,7 +312,7 @@ class ResearchEngineGUI:
             details_frame.pack(fill=tk.X, padx=5, pady=5)
 
             self.analysis_details = scrolledtext.ScrolledText(
-                details_frame, height=6, font=("Consolas", 9)
+                details_frame, height=6, font=ui_tokens.mono("small")
             )
             self.analysis_details.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -410,7 +414,7 @@ class ResearchEngineGUI:
             signal_details_frame.pack(fill=tk.X, padx=5, pady=5)
 
             self.signal_details = scrolledtext.ScrolledText(
-                signal_details_frame, height=5, font=("Consolas", 9)
+                signal_details_frame, height=5, font=ui_tokens.mono("small")
             )
             self.signal_details.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -463,7 +467,7 @@ class ResearchEngineGUI:
             report_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
             self.report_display = scrolledtext.ScrolledText(
-                report_frame, font=("Consolas", 9), wrap=tk.WORD
+                report_frame, font=ui_tokens.mono("small"), wrap=tk.WORD
             )
             self.report_display.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -486,7 +490,7 @@ class ResearchEngineGUI:
 
             ttk.Label(api_frame, text="OpenAI API Key:").pack(side=tk.LEFT)
             self.api_key_entry = ttk.Entry(
-                api_frame, width=50, show="*", font=("Consolas", 9)
+                api_frame, width=50, show="*", font=ui_tokens.mono("small")
             )
             self.api_key_entry.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
 
@@ -594,7 +598,7 @@ class ResearchEngineGUI:
             status_frame.pack(fill=tk.X, padx=5, pady=5)
 
             self.status_text = scrolledtext.ScrolledText(
-                status_frame, height=8, font=("Consolas", 9)
+                status_frame, height=8, font=ui_tokens.mono("small")
             )
             self.status_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -701,8 +705,12 @@ class ResearchEngineGUI:
                     )
 
             # Configure tags
-            self.analysis_tree.tag_configure("buy_signal", foreground="green")
-            self.analysis_tree.tag_configure("sell_signal", foreground="red")
+            self.analysis_tree.tag_configure(
+                "buy_signal", foreground=ui_tokens.STATUS["good"]
+            )
+            self.analysis_tree.tag_configure(
+                "sell_signal", foreground=ui_tokens.STATUS["short"]
+            )
 
             # Update status
             signal_count = len(analysis.get("trade_signals", []))
@@ -846,10 +854,14 @@ class ResearchEngineGUI:
                 )
 
             # Configure tags
-            self.signals_tree.tag_configure("buy_signal", foreground="green")
-            self.signals_tree.tag_configure("sell_signal", foreground="red")
             self.signals_tree.tag_configure(
-                "high_confidence", font=("TkDefaultFont", 9, "bold")
+                "buy_signal", foreground=ui_tokens.STATUS["good"]
+            )
+            self.signals_tree.tag_configure(
+                "sell_signal", foreground=ui_tokens.STATUS["short"]
+            )
+            self.signals_tree.tag_configure(
+                "high_confidence", font=ui_tokens.font("small", "bold")
             )
 
             self.status_label.config(text=f"Generated {len(signals)} trade signals")
@@ -1149,7 +1161,7 @@ def create_research_engine_tab(parent, config: Dict = None):
         ttk.Label(
             placeholder,
             text="LLM Research Engine not available",
-            font=("TkDefaultFont", 12),
+            font=ui_tokens.font("title"),
         ).pack(expand=True)
         return placeholder
 

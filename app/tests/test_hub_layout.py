@@ -523,3 +523,61 @@ def test_coin_charts_learn_whether_the_trader_is_running(hub, monkeypatch):
     while not seen and time.time() < deadline:
         hub.update()
     assert seen and seen[-1].get("trader_running") is False
+
+
+def test_the_status_line_sits_in_the_tab_row_after_the_buttons(hub):
+    """Owner, 2026-10-14: the selected coin chart's status line (neural readout,
+    pattern count) sits right of the coin buttons, outside their scroll area, and
+    the chart has no status row above its plot any more."""
+    row, slot, bar = hub._chart_tabs_row, hub._chart_status_slot, hub.chart_tabs_bar
+    coin, other = hub.coins[0], hub.coins[1]
+    hub._show_chart_page(coin)
+    assert row.pack_slaves() == [
+        hub.chart_settings_button,
+        hub._chart_tf_box,
+        bar,
+        slot,
+    ]
+    chart = hub.charts[coin]
+    assert chart.status_frame.master is slot and chart.neural_status_label.master is (
+        chart.status_frame
+    )
+    assert slot.pack_slaves() == [chart.status_frame]
+    assert hub.charts[other].status_frame.winfo_manager() == ""
+    assert chart.pack_slaves()[0] is chart.canvas.get_tk_widget()  # plot at the top
+    hub._show_chart_page(other)
+    assert slot.pack_slaves() == [hub.charts[other].status_frame]
+    hub._show_chart_page("ACCOUNT")
+    assert slot.pack_slaves() == []
+
+
+def test_the_buttons_shrink_before_the_status_line(hub):
+    hub._show_chart_page(hub.coins[0])
+    hub.update_idletasks()
+    row, bar = hub._chart_tabs_row, hub.chart_tabs_bar
+    buttons = bar.inner.winfo_reqwidth()
+    others = sum(
+        w.winfo_reqwidth()
+        + (
+            sum(w.pack_info()["padx"])
+            if isinstance(w.pack_info()["padx"], tuple)
+            else 2 * int(w.pack_info()["padx"])
+        )
+        for w in row.pack_slaves()
+        if w is not bar
+    )
+    for avail, want in ((buttons + others + 200, buttons), (others + 200, 200)):
+        row.winfo_width = lambda a=avail: a
+        hub._fit_chart_tab_row()
+        assert int(bar._canvas.cget("width")) == want, avail
+
+
+def test_the_chart_sits_4px_under_the_buttons_and_the_divider_moves_up(hub):
+    """Owner, 2026-10-14: 4 px from the buttons to the chart; the divider under the
+    charts starts higher by the height the status row used to take, so the chart
+    keeps its height and the panel below gains it."""
+    for button in hub._chart_tab_buttons.values():
+        assert button.pack_info()["pady"] == (0, 4)
+    assert hub.chart_settings_button.pack_info()["pady"] == (0, 4)
+    label = next(iter(hub.charts.values())).neural_status_label
+    assert hub._moved_status_row_px() == label.winfo_reqheight() + 14 > 14

@@ -16,6 +16,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Callable, List, Optional
 
+import ui_tokens
 from trading_mode import (
     LIVE_CONFIRM_TEXT,
     TESTNET_BROKERS,
@@ -25,9 +26,9 @@ from trading_mode import (
     can_apply,
 )
 
-PAPER_BG, PAPER_FG = "#FFC400", "#0A1B3A"
-LIVE_BG, LIVE_FG = "#B00020", "#FFFFFF"
-TESTNET_BG, TESTNET_FG = "#E67E00", "#FFFFFF"
+PAPER_BG, PAPER_FG = ui_tokens.BANNER["paper"]
+LIVE_BG, LIVE_FG = ui_tokens.BANNER["live"]
+TESTNET_BG, TESTNET_FG = ui_tokens.BANNER["testnet"]
 
 
 def pack_at_top(widget: tk.Misc, parent: tk.Misc) -> None:
@@ -49,10 +50,10 @@ class TradingModeIndicator(tk.Label):
     def __init__(self, parent: tk.Misc, settings: TradingSettings) -> None:
         super().__init__(
             parent,
-            font=("Segoe UI", 11, "bold"),
+            font=ui_tokens.font("subtitle", "bold"),
             anchor="w",
-            padx=14,
-            pady=3,
+            padx=12,
+            pady=4,
         )
         self._settings = settings
         self._price_integrity: Optional[dict] = None
@@ -130,7 +131,7 @@ class TradingModeDialog(tk.Toplevel):
         self.testnet_var = tk.BooleanVar(value=current.testnet)
         self.confirm_var = tk.BooleanVar(value=False)
 
-        body = ttk.Frame(self, padding=14)
+        body = ttk.Frame(self, padding=12)
         body.pack(fill="both", expand=True)
 
         ttk.Radiobutton(
@@ -180,7 +181,7 @@ class TradingModeDialog(tk.Toplevel):
         )
 
         buttons = ttk.Frame(body)
-        buttons.grid(row=6, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        buttons.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12, 0))
         self.apply_btn = ttk.Button(buttons, text="Apply", command=self._apply)
         self.apply_btn.pack(side="right")
         ttk.Button(buttons, text="Cancel", command=self.destroy).pack(

@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Dict, List, Optional
 
+import ui_theme
+import ui_tokens
+
 try:
     from portfolio_analytics import PortfolioAnalytics, get_portfolio_analytics
 
@@ -35,21 +38,6 @@ try:
     PANDAS_AVAILABLE = True
 except ImportError:
     PANDAS_AVAILABLE = False
-
-# Dark theme colors
-DARK_BG = "#070B10"
-DARK_BG2 = "#0B1220"
-DARK_PANEL = "#0E1626"
-DARK_PANEL2 = "#121C2F"
-DARK_BORDER = "#243044"
-DARK_FG = "#C7D1DB"
-DARK_MUTED = "#8B949E"
-DARK_ACCENT = "#00FF66"
-DARK_ACCENT2 = "#00E5FF"
-DARK_SELECT_BG = "#17324A"
-DARK_SELECT_FG = "#00FF66"
-DARK_ERROR = "#FF4757"
-DARK_WARNING = "#FFA502"
 
 
 class PortfolioAnalyticsGUI:
@@ -163,7 +151,9 @@ class PortfolioAnalyticsGUI:
             )
             chart_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-            self.performance_fig = Figure(figsize=(12, 8), facecolor=DARK_BG)
+            self.performance_fig = Figure(
+                figsize=(12, 8), facecolor=ui_tokens.CHART["figure"]
+            )
             self.performance_canvas = FigureCanvasTkAgg(
                 self.performance_fig, chart_frame
             )
@@ -219,7 +209,7 @@ class PortfolioAnalyticsGUI:
             risk_chart_frame = ttk.LabelFrame(self.risk_tab, text="Risk Visualization")
             risk_chart_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-            self.risk_fig = Figure(figsize=(12, 6), facecolor=DARK_BG)
+            self.risk_fig = Figure(figsize=(12, 6), facecolor=ui_tokens.CHART["figure"])
             self.risk_canvas = FigureCanvasTkAgg(self.risk_fig, risk_chart_frame)
             self.risk_canvas.get_tk_widget().pack(fill="both", expand=True)
 
@@ -284,7 +274,9 @@ class PortfolioAnalyticsGUI:
             )
             allocation_chart_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-            self.allocation_fig = Figure(figsize=(12, 6), facecolor=DARK_BG)
+            self.allocation_fig = Figure(
+                figsize=(12, 6), facecolor=ui_tokens.CHART["figure"]
+            )
             self.allocation_canvas = FigureCanvasTkAgg(
                 self.allocation_fig, allocation_chart_frame
             )
@@ -330,7 +322,9 @@ class PortfolioAnalyticsGUI:
         correlation_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
         if MATPLOTLIB_AVAILABLE:
-            self.advanced_fig = Figure(figsize=(12, 8), facecolor=DARK_BG)
+            self.advanced_fig = Figure(
+                figsize=(12, 8), facecolor=ui_tokens.CHART["figure"]
+            )
             self.advanced_canvas = FigureCanvasTkAgg(
                 self.advanced_fig, correlation_frame
             )
@@ -392,14 +386,7 @@ class PortfolioAnalyticsGUI:
         preview_frame = ttk.LabelFrame(self.reports_tab, text="Report Preview")
         preview_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.report_text = tk.Text(
-            preview_frame,
-            height=15,
-            width=80,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-        )
+        self.report_text = tk.Text(preview_frame, height=15, width=80)
         report_scrollbar = ttk.Scrollbar(
             preview_frame, orient="vertical", command=self.report_text.yview
         )
@@ -442,8 +429,8 @@ class PortfolioAnalyticsGUI:
 
                     # Color code based on value
                     if key in ["total_return", "total_return_pct"]:
-                        color = DARK_ACCENT if value >= 0 else DARK_ERROR
-                        label_widget.config(foreground=color)
+                        style = "Good.TLabel" if value >= 0 else "Bad.TLabel"
+                        label_widget.config(style=style)
 
                 # Update performance charts
                 if MATPLOTLIB_AVAILABLE and hasattr(self, "performance_canvas"):
@@ -459,6 +446,7 @@ class PortfolioAnalyticsGUI:
             return
 
         try:
+            chart = ui_tokens.CHART
             self.performance_fig.clear()
 
             # Create subplots
@@ -478,12 +466,12 @@ class PortfolioAnalyticsGUI:
                 ax1.plot(
                     dates,
                     [r * 100 for r in performance.cumulative_returns],
-                    color=DARK_ACCENT,
+                    color=chart["series"],
                     linewidth=2,
                 )
-                ax1.set_title("Cumulative Returns (%)", color=DARK_FG)
-                ax1.set_ylabel("Return (%)", color=DARK_FG)
-                ax1.tick_params(colors=DARK_FG)
+                ax1.set_title("Cumulative Returns (%)", color=chart["text"])
+                ax1.set_ylabel("Return (%)", color=chart["text"])
+                ax1.tick_params(colors=chart["text"])
                 ax1.grid(True, alpha=0.3)
 
                 # Format x-axis
@@ -500,14 +488,14 @@ class PortfolioAnalyticsGUI:
                 ax2.hist(
                     returns_pct,
                     bins=20,
-                    color=DARK_ACCENT,
+                    color=chart["series"],
                     alpha=0.7,
-                    edgecolor=DARK_FG,
+                    edgecolor=chart["text"],
                 )
-                ax2.set_title("Daily Returns Distribution", color=DARK_FG)
-                ax2.set_xlabel("Return (%)", color=DARK_FG)
-                ax2.set_ylabel("Frequency", color=DARK_FG)
-                ax2.tick_params(colors=DARK_FG)
+                ax2.set_title("Daily Returns Distribution", color=chart["text"])
+                ax2.set_xlabel("Return (%)", color=chart["text"])
+                ax2.set_ylabel("Frequency", color=chart["text"])
+                ax2.tick_params(colors=chart["text"])
 
             # Performance metrics bar chart
             ax3 = self.performance_fig.add_subplot(gs[1, 1])
@@ -517,20 +505,15 @@ class PortfolioAnalyticsGUI:
                 performance.sharpe_ratio,
                 -performance.max_drawdown,
             ]
-            colors = [DARK_ACCENT if v >= 0 else DARK_ERROR for v in values]
+            status = ui_tokens.STATUS
+            colors = [status["good"] if v >= 0 else status["bad"] for v in values]
 
             bars = ax3.bar(metrics, values, color=colors, alpha=0.7)
-            ax3.set_title("Key Metrics", color=DARK_FG)
-            ax3.tick_params(colors=DARK_FG)
-            ax3.axhline(y=0, color=DARK_FG, linestyle="-", alpha=0.5)
+            ax3.set_title("Key Metrics", color=chart["text"])
+            ax3.tick_params(colors=chart["text"])
+            ax3.axhline(y=0, color=chart["text"], linestyle="-", alpha=0.5)
 
-            # Style the figure
-            self.performance_fig.patch.set_facecolor(DARK_BG)
-            for ax in [ax1, ax2, ax3]:
-                ax.set_facecolor(DARK_BG)
-                for spine in ax.spines.values():
-                    spine.set_color(DARK_BORDER)
-
+            ui_theme.theme_figure(self.performance_fig)
             self.performance_canvas.draw()
 
         except Exception as e:
@@ -556,14 +539,14 @@ class PortfolioAnalyticsGUI:
                         "expected_shortfall_99",
                     ]:
                         formatted_value = f"${value:.2f}"
-                        label_widget.config(foreground=DARK_ERROR)
+                        label_widget.config(style="Bad.TLabel")
                     elif key == "portfolio_volatility":
                         formatted_value = f"{value * 100:.2f}{suffix}"
-                        color = DARK_WARNING if value > 0.5 else DARK_FG
-                        label_widget.config(foreground=color)
+                        style = "Warn.TLabel" if value > 0.5 else "TLabel"
+                        label_widget.config(style=style)
                     else:
                         formatted_value = f"{value:.3f}{suffix}"
-                        label_widget.config(foreground=DARK_FG)
+                        label_widget.config(style="TLabel")
 
                     label_widget.config(text=formatted_value)
 
@@ -581,6 +564,8 @@ class PortfolioAnalyticsGUI:
             return
 
         try:
+            chart = ui_tokens.CHART
+            status = ui_tokens.STATUS
             self.risk_fig.clear()
 
             # VaR and ES comparison
@@ -596,12 +581,12 @@ class PortfolioAnalyticsGUI:
             bars = ax1.bar(
                 categories,
                 values,
-                color=[DARK_WARNING, DARK_ERROR, DARK_WARNING, DARK_ERROR],
+                color=[status["warn"], status["bad"], status["warn"], status["bad"]],
                 alpha=0.7,
             )
-            ax1.set_title("Risk Measures", color=DARK_FG)
-            ax1.set_ylabel("Value ($)", color=DARK_FG)
-            ax1.tick_params(colors=DARK_FG)
+            ax1.set_title("Risk Measures", color=chart["text"])
+            ax1.set_ylabel("Value ($)", color=chart["text"])
+            ax1.tick_params(colors=chart["text"])
 
             # Rotate labels for better readability
             plt.setp(ax1.get_xticklabels(), rotation=45)
@@ -613,13 +598,13 @@ class PortfolioAnalyticsGUI:
             volatility = risk_metrics.portfolio_volatility
             if volatility < 0.2:
                 risk_level = "Low"
-                color = DARK_ACCENT
+                color = status["good"]
             elif volatility < 0.5:
                 risk_level = "Medium"
-                color = DARK_WARNING
+                color = status["warn"]
             else:
                 risk_level = "High"
-                color = DARK_ERROR
+                color = status["bad"]
 
             ax2.text(
                 0.5,
@@ -628,7 +613,7 @@ class PortfolioAnalyticsGUI:
                 ha="center",
                 va="center",
                 fontsize=14,
-                color=DARK_FG,
+                color=chart["text"],
             )
             ax2.text(
                 0.5,
@@ -647,20 +632,14 @@ class PortfolioAnalyticsGUI:
                 ha="center",
                 va="center",
                 fontsize=12,
-                color=DARK_FG,
+                color=chart["text"],
             )
 
             ax2.set_xlim(0, 1)
             ax2.set_ylim(0, 1)
             ax2.axis("off")
 
-            # Style the figure
-            self.risk_fig.patch.set_facecolor(DARK_BG)
-            for ax in [ax1]:
-                ax.set_facecolor(DARK_BG)
-                for spine in ax.spines.values():
-                    spine.set_color(DARK_BORDER)
-
+            ui_theme.theme_figure(self.risk_fig)
             self.risk_canvas.draw()
 
         except Exception as e:
@@ -711,6 +690,7 @@ class PortfolioAnalyticsGUI:
             return
 
         try:
+            chart = ui_tokens.CHART
             self.allocation_fig.clear()
             ax = self.allocation_fig.add_subplot(1, 1, 1)
 
@@ -735,10 +715,10 @@ class PortfolioAnalyticsGUI:
                         markersize=4,
                     )
 
-            ax.set_title("Asset Allocation History", color=DARK_FG)
-            ax.set_xlabel("Date", color=DARK_FG)
-            ax.set_ylabel("Allocation (%)", color=DARK_FG)
-            ax.tick_params(colors=DARK_FG)
+            ax.set_title("Asset Allocation History", color=chart["text"])
+            ax.set_xlabel("Date", color=chart["text"])
+            ax.set_ylabel("Allocation (%)", color=chart["text"])
+            ax.tick_params(colors=chart["text"])
             ax.legend()
             ax.grid(True, alpha=0.3)
 
@@ -746,12 +726,7 @@ class PortfolioAnalyticsGUI:
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
             self.allocation_fig.autofmt_xdate()
 
-            # Style the figure
-            self.allocation_fig.patch.set_facecolor(DARK_BG)
-            ax.set_facecolor(DARK_BG)
-            for spine in ax.spines.values():
-                spine.set_color(DARK_BORDER)
-
+            ui_theme.theme_figure(self.allocation_fig)  # the legend too
             self.allocation_canvas.draw()
 
         except Exception as e:
@@ -884,18 +859,20 @@ if not ANALYTICS_AVAILABLE:
             frame.pack(fill="both", expand=True, padx=20, pady=20)
 
             ttk.Label(
-                frame, text="Enhanced Portfolio Analytics", font=("Arial", 16, "bold")
+                frame,
+                text="Enhanced Portfolio Analytics",
+                font=ui_tokens.font("display", "bold"),
             ).pack(pady=20)
 
             ttk.Label(
                 frame,
                 text="⚠️ Portfolio analytics system not available",
-                foreground=DARK_WARNING,
-                font=("Arial", 12),
+                style="Warn.TLabel",
+                font=ui_tokens.font("title"),
             ).pack(pady=10)
 
             ttk.Label(
-                frame, text="Missing dependencies:", font=("Arial", 10, "bold")
+                frame, text="Missing dependencies:", font=ui_tokens.font("body", "bold")
             ).pack(pady=5)
 
             missing_deps = []
@@ -906,15 +883,15 @@ if not ANALYTICS_AVAILABLE:
 
             if missing_deps:
                 for dep in missing_deps:
-                    ttk.Label(frame, text=f"• {dep}", foreground=DARK_ERROR).pack()
+                    ttk.Label(frame, text=f"• {dep}", style="Bad.TLabel").pack()
             else:
                 ttk.Label(
-                    frame, text="• portfolio_analytics module", foreground=DARK_ERROR
+                    frame, text="• portfolio_analytics module", style="Bad.TLabel"
                 ).pack()
 
             ttk.Label(
                 frame,
                 text="Install missing dependencies to enable advanced analytics",
-                foreground=DARK_MUTED,
-                font=("Arial", 10),
+                style="Muted.TLabel",
+                font=ui_tokens.font("body"),
             ).pack(pady=10)

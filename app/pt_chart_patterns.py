@@ -23,19 +23,20 @@ from tkinter import ttk
 
 import candlestick_patterns as cp
 import chart_settings as cs
+import ui_tokens
 from market_data.listing import not_trading_reason
 
 # Colours shared with the hub's dark theme (pt_hub.py); labels never use a candle or
 # overlay colour (FDS-CHART-001 section 9).
-LABEL_FG = "#C7D1DB"
-LABEL_BG = "#0B1220"
-LABEL_EDGE = "#243044"
+LABEL_FG = ui_tokens.CHART["text"]
+LABEL_BG = ui_tokens.CHART["label_bg"]
+LABEL_EDGE = ui_tokens.CHART["grid"]
 MIN_TARGET_PX = 24  # hover / click target (WCAG 2.5.8)
 LABEL_OFFSET_PT = 12  # label distance from its candle
 LABEL_STEP_PT = 16  # extra distance per stagger level
 LABEL_LEVELS = 4  # stagger levels before labels may overlap again
 LABEL_GAP_BARS = 10  # labels closer than this (in candles) on one side are staggered
-LABEL_FONT_PT = 8
+LABEL_FONT_PT = ui_tokens.CHART_FONT_PT
 LABEL_BOX_PAD = 0.3  # label box padding, as a fraction of the font size
 MAX_LABEL_SHARE = 0.4  # most of the plot height one label may claim (tiny charts)
 RETRY_SECONDS = 60.0
@@ -861,7 +862,7 @@ class ChartSettingsWindow(tk.Toplevel):
         lo, hi = cs.MAX_LABELS_RANGE
         ttk.Spinbox(
             opts, from_=lo, to=hi, width=4, textvariable=self.max_labels_var
-        ).pack(side="left", padx=(4, 16))
+        ).pack(side="left", padx=(4, 12))
         ttk.Checkbutton(
             opts, text="Show what happened next", variable=self.next_arrows_var
         ).pack(side="left")

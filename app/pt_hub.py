@@ -33,6 +33,8 @@ from matplotlib.transforms import ScaledTranslation, blended_transform_factory
 
 import chart_settings
 import pt_paths
+import ui_theme
+import ui_tokens
 
 try:
     import pt_migrate
@@ -41,11 +43,9 @@ except ImportError:  # the hub must start even without it
 from pt_paper_mode import (
     PAPER_MODE_BALANCE_KEY,
     PaperBanner,
-    apply_palette_to_style,
     attach_trading_section_label,
     fetch_binance_btc_price,
     get_palette,
-    install_classic_widget_defaults,
     run_sample_scenario,
 )
 import trainer_guard
@@ -242,14 +242,18 @@ class ToolTip:
         self.tooltip_window.wm_overrideredirect(True)
         self.tooltip_window.wm_geometry(f"+{x}+{y}")
 
+        p = ui_theme.active_palette()  # a dark tooltip, like the rest of the hub
         label = tk.Label(
             self.tooltip_window,
             text=text,
-            background="#FFFFDD",
-            foreground="#000000",
-            relief="solid",
-            borderwidth=1,
-            font=("TkDefaultFont", 8),
+            background=p["PANEL2"],
+            foreground=p["FG"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=p["BORDER"],
+            highlightcolor=p["BORDER"],
+            font=ui_tokens.font("caption"),
             padx=5,
             pady=2,
             justify="left",
@@ -264,24 +268,34 @@ class ToolTip:
             self.tooltip_window = None
 
 
-DARK_BG = "#070B10"
-DARK_BG2 = "#0B1220"
-DARK_PANEL = "#0E1626"
-DARK_PANEL2 = "#121C2F"
-DARK_BORDER = "#243044"
-DARK_FG = "#C7D1DB"
-DARK_MUTED = "#8B949E"
-DARK_ACCENT = "#00FF66"
-DARK_ACCENT2 = "#00E5FF"
-DARK_SELECT_BG = "#17324A"
-DARK_SELECT_FG = "#00FF66"
+# The dark palette (ui_tokens holds every colour; ui_theme builds the ttk styles)
+DARK_BG = ui_tokens.DARK["BG"]
+DARK_BG2 = ui_tokens.DARK["BG2"]
+DARK_PANEL = ui_tokens.DARK["PANEL"]
+DARK_PANEL2 = ui_tokens.DARK["PANEL2"]
+DARK_BORDER = ui_tokens.DARK["BORDER"]
+DARK_FG = ui_tokens.DARK["FG"]
+DARK_MUTED = ui_tokens.DARK["MUTED"]
+DARK_ACCENT = ui_tokens.DARK["ACCENT"]
+DARK_ACCENT2 = ui_tokens.DARK["ACCENT2"]
+DARK_SELECT_BG = ui_tokens.DARK["SELECT_BG"]
+DARK_SELECT_FG = ui_tokens.DARK["SELECT_FG"]
 
 # Status colours (training table, live output): idle grey, busy amber, done green.
 STATUS_IDLE = DARK_MUTED
-STATUS_AMBER = "#ffa726"
-STATUS_GREEN = "#4CAF50"
-STATUS_RED = "#ff6b6b"
-LOG_SHORT = "#FF8A65"
+STATUS_AMBER = ui_tokens.STATUS["warn"]
+STATUS_GREEN = ui_tokens.STATUS["good"]
+STATUS_RED = ui_tokens.STATUS["bad"]
+LOG_SHORT = ui_tokens.STATUS["short"]
+
+# Chart colours: surfaces, level lines and price tags, trade markers
+CHART = ui_tokens.CHART
+LINES = ui_tokens.CHART_LINES
+MARKERS = ui_tokens.TRADE_MARKERS
+CHART_FONT_PT = ui_tokens.CHART_FONT_PT
+SPACE = ui_tokens.SPACE  # spacing scale, in pixels
+# Not a gap: how far down the chart status text sits to centre it on the tab buttons
+STATUS_TEXT_DROP = 9
 
 # Live-output colouring: the first rule that matches a line picks its tag.
 _LOG_LINE_RULES = (
@@ -376,6 +390,11 @@ class ScrollingRow(ttk.Frame):
     def add(self, widget: tk.Widget, padx=(0, 0), pady=(0, 0)) -> None:
         widget.pack(side="left", padx=padx, pady=pady)
 
+    def set_width(self, width: int) -> None:
+        """How wide the visible part of the row is; less than its content scrolls."""
+        if int(float(self._canvas.cget("width"))) != int(width):
+            self._canvas.configure(width=int(width))
+
     @property
     def scrolls(self) -> bool:
         return self._bar.winfo_manager() == "pack"
@@ -385,7 +404,7 @@ class ScrollingRow(ttk.Frame):
         self._canvas.configure(height=height, scrollregion=(0, 0, width, height))
         need = width > self._canvas.winfo_width() > 1
         if need and not self.scrolls:
-            self._bar.pack(side="top", fill="x", pady=(0, 4))
+            self._bar.pack(side="top", fill="x", pady=(0, ui_tokens.SPACE["xs"]))
         elif not need and self.scrolls:
             self._bar.pack_forget()
             self._canvas.xview_moveto(0)
@@ -945,7 +964,7 @@ class CandleFetcher:
 # tags). Fixed fractions left a wide, short chart a fifth of its height empty above and
 # below and an eighth of its width at each side.
 CHART_PAD = 0.4  # space round the chart's outer text, as a fraction of the font size
-TAG_FONT_PT = 8  # right-hand price tags (ASK, BID, AVG, DCA, SELL)
+TAG_FONT_PT = CHART_FONT_PT  # right-hand price tags (ASK, BID, AVG, DCA, SELL)
 TAG_BOX_PAD = 0.18  # their box padding, as a fraction of the font size
 NAME_GAP_PT = 6  # price name above the plot: clear of a price label on the top tick
 
@@ -1008,7 +1027,7 @@ def _corner_axis_names(fig: Figure, ax, price_name: str, time_name: str) -> List
             transform=above,
             ha="left",
             va="bottom",
-            color=DARK_FG,
+            color=CHART["text"],
             fontsize=size,
         ),
         fig.text(
@@ -1018,7 +1037,7 @@ def _corner_axis_names(fig: Figure, ax, price_name: str, time_name: str) -> List
             transform=beside,
             ha="left",
             va="top",
-            color=DARK_FG,
+            color=CHART["text"],
             fontsize=size,
         ),
     ]
@@ -1043,6 +1062,7 @@ class CandleChart(ttk.Frame):
         coin: str,
         settings_getter,
         trade_history_path: str,
+        status_parent: Optional[tk.Widget] = None,
     ):
         super().__init__(parent)
         self.fetcher = fetcher
@@ -1054,8 +1074,15 @@ class CandleChart(ttk.Frame):
             value=self.settings_getter()["default_timeframe"]
         )
 
-        top = ttk.Frame(self)
-        top.pack(fill="x", padx=6, pady=6)
+        # The status line (neural readout, pattern count). In the hub it sits in the
+        # tab row, right of the coin buttons, and the hub shows the selected chart's
+        # (owner, 2026-10-14); on its own the chart gives it a row above the plot.
+        if status_parent is None:
+            top = ttk.Frame(self)
+            top.pack(fill="x", padx=6, pady=6)
+        else:
+            top = ttk.Frame(status_parent)  # packed by the hub while selected
+        self.status_frame = top
 
         # No coin name and no timeframe box here (owner, 2026-10-14): the coin
         # buttons above name the chart, and the hub's Timeframe box at the end of
@@ -1079,7 +1106,7 @@ class CandleChart(ttk.Frame):
         # On Windows scaling, trying to "sync DPI" via winfo_fpixels("1i") can produce the
         # exact right-side blank/covered region you're seeing.
         self.fig = Figure(figsize=(6.5, 3.5), dpi=100)
-        self.fig.patch.set_facecolor(DARK_BG)
+        self.fig.patch.set_facecolor(CHART["figure"])
         # margins: fit_layout(), after every refresh and resize
 
         self.ax = self.fig.add_subplot(111)
@@ -1095,7 +1122,7 @@ class CandleChart(ttk.Frame):
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         canvas_w = self.canvas.get_tk_widget()
-        canvas_w.configure(bg=DARK_BG)
+        canvas_w.configure(bg=CHART["figure"])
 
         # Remove horizontal padding here so the chart widget truly fills the container.
         canvas_w.pack(fill="both", expand=True, padx=0, pady=0)
@@ -1200,12 +1227,12 @@ class CandleChart(ttk.Frame):
     def _apply_dark_chart_style(self) -> None:
         """Apply dark styling (called on init and after every ax.clear())."""
         try:
-            self.fig.patch.set_facecolor(DARK_BG)
-            self.ax.set_facecolor(DARK_PANEL)
-            self.ax.tick_params(colors=DARK_FG)
+            self.fig.patch.set_facecolor(CHART["figure"])
+            self.ax.set_facecolor(CHART["plot"])
+            self.ax.tick_params(colors=CHART["text"])
             for spine in self.ax.spines.values():
-                spine.set_color(DARK_BORDER)
-            self.ax.grid(True, color=DARK_BORDER, linewidth=0.6, alpha=0.35)
+                spine.set_color(CHART["grid"])
+            self.ax.grid(True, color=CHART["grid"], linewidth=0.6, alpha=0.35)
         except Exception:
             pass
 
@@ -1308,7 +1335,7 @@ class CandleChart(ttk.Frame):
                 transform=self.ax.transAxes,
                 ha="center",
                 va="center",
-                color=DARK_FG,
+                color=CHART["text"],
             )
             self.pattern_layer.update([], tf, folder, chart_cfg)
             self.fit_layout()
@@ -1372,13 +1399,17 @@ class CandleChart(ttk.Frame):
         # Overlay Neural levels (blue long, orange short)
         for lv in long_levels if show("neural_long") else []:
             try:
-                self.ax.axhline(y=float(lv), linewidth=1, color="blue", alpha=0.8)
+                self.ax.axhline(
+                    y=float(lv), linewidth=1, color=LINES["neural_long"], alpha=0.8
+                )
             except Exception:
                 pass
 
         for lv in short_levels if show("neural_short") else []:
             try:
-                self.ax.axhline(y=float(lv), linewidth=1, color="orange", alpha=0.8)
+                self.ax.axhline(
+                    y=float(lv), linewidth=1, color=LINES["neural_short"], alpha=0.8
+                )
             except Exception:
                 pass
 
@@ -1386,7 +1417,7 @@ class CandleChart(ttk.Frame):
         try:
             if show("trail") and trail_line is not None and float(trail_line) > 0:
                 self.ax.axhline(
-                    y=float(trail_line), linewidth=1.5, color="green", alpha=0.95
+                    y=float(trail_line), linewidth=1.5, color=LINES["trail"], alpha=0.95
                 )
         except Exception:
             pass
@@ -1394,7 +1425,10 @@ class CandleChart(ttk.Frame):
         try:
             if show("dca") and dca_line_price is not None and float(dca_line_price) > 0:
                 self.ax.axhline(
-                    y=float(dca_line_price), linewidth=1.5, color="red", alpha=0.95
+                    y=float(dca_line_price),
+                    linewidth=1.5,
+                    color=LINES["dca"],
+                    alpha=0.95,
                 )
         except Exception:
             pass
@@ -1403,7 +1437,10 @@ class CandleChart(ttk.Frame):
         try:
             if show("avg") and avg_cost_basis is not None and float(avg_cost_basis) > 0:
                 self.ax.axhline(
-                    y=float(avg_cost_basis), linewidth=1.5, color="yellow", alpha=0.95
+                    y=float(avg_cost_basis),
+                    linewidth=1.5,
+                    color=LINES["avg"],
+                    alpha=0.95,
                 )
         except Exception:
             pass
@@ -1421,7 +1458,7 @@ class CandleChart(ttk.Frame):
                     y=float(current_buy_price),
                     linewidth=1.5,
                     linestyle=quote_style,
-                    color="purple",
+                    color=LINES["ask"],
                     alpha=0.95,
                 )
         except Exception:
@@ -1437,7 +1474,7 @@ class CandleChart(ttk.Frame):
                     y=float(current_sell_price),
                     linewidth=1.5,
                     linestyle=quote_style,
-                    color="teal",
+                    color=LINES["bid"],
                     alpha=0.95,
                 )
         except Exception:
@@ -1457,11 +1494,11 @@ class CandleChart(ttk.Frame):
             wanted = []
             # Map to your terminology: Ask=buy line, Bid=sell line
             for key, y_val, tag, color in (
-                ("ask", current_buy_price, "ASK", "purple"),
-                ("bid", current_sell_price, "BID", "teal"),
-                ("avg", avg_cost_basis, "AVG", "yellow"),
-                ("dca", dca_line_price, "DCA", "red"),
-                ("trail", trail_line, "SELL", "green"),
+                ("ask", current_buy_price, "ASK", LINES["ask"]),
+                ("bid", current_sell_price, "BID", LINES["bid"]),
+                ("avg", avg_cost_basis, "AVG", LINES["avg"]),
+                ("dca", dca_line_price, "DCA", LINES["dca"]),
+                ("trail", trail_line, "SELL", LINES["trail"]),
             ):
                 if not show(key) or y_val is None:
                     continue
@@ -1504,7 +1541,7 @@ class CandleChart(ttk.Frame):
                         fontsize=TAG_FONT_PT,
                         color=color,
                         bbox=dict(
-                            facecolor=DARK_BG2,
+                            facecolor=CHART["label_bg"],
                             edgecolor=color,
                             boxstyle=f"round,pad={TAG_BOX_PAD}",
                             alpha=0.85,
@@ -1540,10 +1577,10 @@ class CandleChart(ttk.Frame):
 
                     if side == "buy":
                         label = "DCA" if tag == "DCA" else "BUY"
-                        color = "purple" if tag == "DCA" else "red"
+                        color = MARKERS["dca"] if tag == "DCA" else MARKERS["buy"]
                     elif side == "sell":
                         label = "SELL"
-                        color = "green"
+                        color = MARKERS["sell"]
                     else:
                         continue
 
@@ -1593,8 +1630,8 @@ class CandleChart(ttk.Frame):
                         textcoords="offset points",
                         xytext=(0, 10),
                         ha="center",
-                        fontsize=8,
-                        color=DARK_FG,
+                        fontsize=CHART_FONT_PT,
+                        color=CHART["text"],
                         zorder=7,
                     )
         except Exception:
@@ -1632,7 +1669,7 @@ class CandleChart(ttk.Frame):
             self.ax.minorticks_off()
             self.ax.set_xticks(tick_x)
             self.ax.set_xticklabels(tick_lbl)
-            self.ax.tick_params(axis="x", labelsize=8)
+            self.ax.tick_params(axis="x", labelsize=CHART_FONT_PT)
             _end_date_inside(self.ax)
         except Exception:
             pass
@@ -1683,20 +1720,20 @@ class AccountValueChart(ttk.Frame):
         self.last_update_label.pack(side="right")
 
         self.fig = Figure(figsize=(6.5, 3.5), dpi=100)
-        self.fig.patch.set_facecolor(DARK_BG)
+        self.fig.patch.set_facecolor(CHART["figure"])
         # margins: _fit_axes(), after every refresh and resize
 
         self.ax = self.fig.add_subplot(111)
         self._apply_dark_chart_style()
-        self.ax.set_title("Account Value", color=DARK_FG)
+        self.ax.set_title("Account Value", color=CHART["text"])
 
         # Add axis labels
-        self.ax.set_xlabel("Time", color=DARK_FG)
-        self.ax.set_ylabel("Account Value ($USD)", color=DARK_FG)
+        self.ax.set_xlabel("Time", color=CHART["text"])
+        self.ax.set_ylabel("Account Value ($USD)", color=CHART["text"])
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         canvas_w = self.canvas.get_tk_widget()
-        canvas_w.configure(bg=DARK_BG)
+        canvas_w.configure(bg=CHART["figure"])
 
         # Remove horizontal padding here so the chart widget truly fills the container.
         canvas_w.pack(fill="both", expand=True, padx=0, pady=0)
@@ -1741,12 +1778,12 @@ class AccountValueChart(ttk.Frame):
 
     def _apply_dark_chart_style(self) -> None:
         try:
-            self.fig.patch.set_facecolor(DARK_BG)
-            self.ax.set_facecolor(DARK_PANEL)
-            self.ax.tick_params(colors=DARK_FG)
+            self.fig.patch.set_facecolor(CHART["figure"])
+            self.ax.set_facecolor(CHART["plot"])
+            self.ax.tick_params(colors=CHART["text"])
             for spine in self.ax.spines.values():
-                spine.set_color(DARK_BORDER)
-            self.ax.grid(True, color=DARK_BORDER, linewidth=0.6, alpha=0.35)
+                spine.set_color(CHART["grid"])
+            self.ax.grid(True, color=CHART["grid"], linewidth=0.6, alpha=0.35)
         except Exception:
             pass
 
@@ -1876,11 +1913,11 @@ class AccountValueChart(ttk.Frame):
             self.ax.cla()
             self._apply_dark_chart_style()
             # Restore axis labels after clearing
-            self.ax.set_xlabel("Time", color=DARK_FG)
-            self.ax.set_ylabel("Account Value ($USD)", color=DARK_FG)
+            self.ax.set_xlabel("Time", color=CHART["text"])
+            self.ax.set_ylabel("Account Value ($USD)", color=CHART["text"])
 
         if not points:
-            self.ax.set_title("Account Value - no data", color=DARK_FG)
+            self.ax.set_title("Account Value - no data", color=CHART["text"])
             self.last_update_label.config(text="Last: N/A")
             _fit_axes(self.fig)
             self.canvas.draw_idle()
@@ -1911,10 +1948,10 @@ class AccountValueChart(ttk.Frame):
 
                     if side == "buy":
                         action_label = "DCA" if tag == "DCA" else "BUY"
-                        color = "purple" if tag == "DCA" else "red"
+                        color = MARKERS["dca"] if tag == "DCA" else MARKERS["buy"]
                     elif side == "sell":
                         action_label = "SELL"
-                        color = "green"
+                        color = MARKERS["sell"]
                     else:
                         continue
 
@@ -1956,8 +1993,8 @@ class AccountValueChart(ttk.Frame):
                         textcoords="offset points",
                         xytext=(0, 10),
                         ha="center",
-                        fontsize=8,
-                        color=DARK_FG,
+                        fontsize=CHART_FONT_PT,
+                        color=CHART["text"],
                         zorder=7,
                     )
 
@@ -1999,7 +2036,7 @@ class AccountValueChart(ttk.Frame):
             self.ax.minorticks_off()
             self.ax.set_xticks(tick_x)
             self.ax.set_xticklabels(tick_lbl)
-            self.ax.tick_params(axis="x", labelsize=8)
+            self.ax.tick_params(axis="x", labelsize=CHART_FONT_PT)
             _end_date_inside(self.ax)
         except Exception:
             pass
@@ -2007,9 +2044,11 @@ class AccountValueChart(ttk.Frame):
         self.ax.set_xlim(-0.5, (len(points) - 0.5) + 0.6)
 
         try:
-            self.ax.set_title(f"Account Value ({_fmt_money(ys[-1])})", color=DARK_FG)
+            self.ax.set_title(
+                f"Account Value ({_fmt_money(ys[-1])})", color=CHART["text"]
+            )
         except Exception:
-            self.ax.set_title("Account Value", color=DARK_FG)
+            self.ax.set_title("Account Value", color=CHART["text"])
 
         try:
             self.last_update_label.config(
@@ -2284,309 +2323,13 @@ class PowerTraderHub(tk.Tk):
     # ---- forced dark mode ----
 
     def _apply_forced_dark_mode(self) -> None:
-        """Force a single, global, non-optional dark theme."""
-        # Root background (handles the areas behind ttk widgets)
+        """Apply the hub's one ttk theme from the active palette: dark, or blue in
+        paper mode. ui_theme builds every style from ui_tokens."""
+        palette = get_palette(bool(getattr(self, "_paper_mode", False)))
         try:
-            self.configure(bg=DARK_BG)
-        except Exception:
+            ui_theme.apply_theme(self, ttk.Style(self), palette)
+        except tk.TclError:
             pass
-
-        # Defaults for classic Tk widgets (Text/Listbox/Menu) created later
-        try:
-            self.option_add("*Text.background", DARK_PANEL)
-            self.option_add("*Text.foreground", DARK_FG)
-            self.option_add("*Text.insertBackground", DARK_FG)
-            self.option_add("*Text.selectBackground", DARK_SELECT_BG)
-            self.option_add("*Text.selectForeground", DARK_SELECT_FG)
-
-            self.option_add("*Listbox.background", DARK_PANEL)
-            self.option_add("*Listbox.foreground", DARK_FG)
-            self.option_add("*Listbox.selectBackground", DARK_SELECT_BG)
-            self.option_add("*Listbox.selectForeground", DARK_SELECT_FG)
-
-            self.option_add("*Menu.background", DARK_BG2)
-            self.option_add("*Menu.foreground", DARK_FG)
-            self.option_add("*Menu.activeBackground", DARK_SELECT_BG)
-            self.option_add("*Menu.activeForeground", DARK_SELECT_FG)
-        except Exception:
-            pass
-
-        style = ttk.Style(self)
-
-        # Pick a theme that is actually recolorable (Windows 'vista' theme ignores many color configs)
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-
-        # Base defaults
-        try:
-            style.configure(".", background=DARK_BG, foreground=DARK_FG)
-        except Exception:
-            pass
-
-        # Containers / text
-        for name in ("TFrame", "TLabel", "TCheckbutton", "TRadiobutton"):
-            try:
-                style.configure(name, background=DARK_BG, foreground=DARK_FG)
-            except Exception:
-                pass
-
-        try:
-            style.configure(
-                "TLabelframe",
-                background=DARK_BG,
-                foreground=DARK_FG,
-                bordercolor="white",
-            )
-            style.configure(
-                "TLabelframe.Label", background=DARK_BG, foreground=DARK_ACCENT
-            )
-        except Exception:
-            pass
-
-        try:
-            style.configure("TSeparator", background=DARK_BORDER)
-        except Exception:
-            pass
-
-        # Buttons
-        try:
-            style.configure(
-                "TButton",
-                background=DARK_BG2,
-                foreground=DARK_FG,
-                bordercolor=DARK_BORDER,
-                focusthickness=1,
-                focuscolor=DARK_ACCENT,
-                padding=(3, 2),  # Reduced from (10, 6) for more compact buttons
-            )
-            style.map(
-                "TButton",
-                background=[
-                    ("active", DARK_PANEL2),
-                    ("pressed", DARK_PANEL),
-                    ("disabled", DARK_BG2),
-                ],
-                foreground=[
-                    ("active", DARK_ACCENT),
-                    ("disabled", DARK_MUTED),
-                ],
-                bordercolor=[
-                    ("active", DARK_ACCENT2),
-                    ("focus", DARK_ACCENT),
-                ],
-            )
-        except Exception:
-            pass
-
-        # Entries / combos
-        try:
-            style.configure(
-                "TEntry",
-                fieldbackground=DARK_PANEL,
-                foreground=DARK_FG,
-                bordercolor=DARK_BORDER,
-                insertcolor=DARK_FG,
-            )
-        except Exception:
-            pass
-
-        try:
-            style.configure(
-                "TCombobox",
-                fieldbackground=DARK_PANEL,
-                background=DARK_PANEL,
-                foreground=DARK_FG,
-                bordercolor=DARK_BORDER,
-                arrowcolor=DARK_ACCENT,
-            )
-            style.map(
-                "TCombobox",
-                fieldbackground=[
-                    ("readonly", DARK_PANEL),
-                    ("focus", DARK_PANEL2),
-                ],
-                foreground=[("readonly", DARK_FG)],
-                background=[("readonly", DARK_PANEL)],
-            )
-        except Exception:
-            pass
-
-        try:
-            style.configure(
-                "TSpinbox",
-                fieldbackground=DARK_PANEL,
-                background=DARK_PANEL,
-                foreground=DARK_FG,
-                bordercolor=DARK_BORDER,
-                arrowcolor=DARK_ACCENT,
-                insertcolor=DARK_FG,
-            )
-            style.map(
-                "TSpinbox",
-                fieldbackground=[("readonly", DARK_PANEL), ("focus", DARK_PANEL2)],
-                foreground=[("readonly", DARK_FG)],
-            )
-        except Exception:
-            pass
-
-        # Notebooks
-        try:
-            style.configure("TNotebook", background=DARK_BG, bordercolor=DARK_BORDER)
-            style.configure(
-                "TNotebook.Tab",
-                background=DARK_BG2,
-                foreground=DARK_FG,
-                padding=(10, 6),
-            )
-            style.map(
-                "TNotebook.Tab",
-                background=[
-                    ("selected", DARK_PANEL),
-                    ("active", DARK_PANEL2),
-                ],
-                foreground=[
-                    ("selected", DARK_ACCENT),
-                    ("active", DARK_ACCENT2),
-                ],
-            )
-
-            # Charts tabs need to wrap to multiple lines. ttk.Notebook can't do that,
-            # so we hide the Notebook's native tabs and render our own wrapping tab bar.
-            #
-            # IMPORTANT: the layout must exclude Notebook.tab entirely, and on some themes
-            # you must keep Notebook.padding for proper sizing; otherwise the tab strip
-            # can still render.
-            style.configure("HiddenTabs.TNotebook", tabmargins=0)
-            style.layout(
-                "HiddenTabs.TNotebook",
-                [
-                    (
-                        "Notebook.padding",
-                        {
-                            "sticky": "nswe",
-                            "children": [
-                                ("Notebook.client", {"sticky": "nswe"}),
-                            ],
-                        },
-                    )
-                ],
-            )
-
-            # Chart-tab buttons (normal + selected), sized to their text: 10 px
-            # from the text to each edge (owner, 2026-10-14) is 7 px of padding
-            # plus the theme's 3 px of border and focus ring. Width 0 drops the
-            # theme's 11-character minimum.
-            style.configure(
-                "ChartTab.TButton",
-                background=DARK_BG2,
-                foreground=DARK_FG,
-                bordercolor=DARK_BORDER,
-                padding=(7, 7),
-                width=0,
-            )
-            style.map(
-                "ChartTab.TButton",
-                background=[("active", DARK_PANEL2), ("pressed", DARK_PANEL)],
-                foreground=[("active", DARK_ACCENT2)],
-                bordercolor=[("active", DARK_ACCENT2), ("focus", DARK_ACCENT)],
-            )
-
-            style.configure(
-                "ChartTabSelected.TButton",
-                background=DARK_PANEL,
-                foreground=DARK_ACCENT,
-                bordercolor=DARK_ACCENT2,
-                padding=(7, 7),
-                width=0,
-            )
-
-            # The Chart settings cog has no visible border (owner, 2026-10-14): its
-            # border is painted in the row's own colour, so it stays as tall as the
-            # tab buttons, and hovering still lights it up.
-            style.configure(
-                "ChartCog.TButton",
-                background=DARK_BG,
-                foreground=DARK_FG,
-                bordercolor=DARK_BG,
-                lightcolor=DARK_BG,
-                darkcolor=DARK_BG,
-                focuscolor=DARK_BG,
-                padding=(7, 7),
-                width=0,
-            )
-            hover = [("pressed", DARK_PANEL), ("active", DARK_PANEL2)]
-            style.map(
-                "ChartCog.TButton",
-                background=hover,
-                bordercolor=hover,
-                lightcolor=hover,
-                darkcolor=hover,
-                focuscolor=hover,
-                foreground=[("active", DARK_ACCENT2)],
-            )
-        except Exception:
-            pass
-
-        # Treeview (Current Trades table)
-        try:
-            style.configure(
-                "Treeview",
-                background=DARK_PANEL,
-                fieldbackground=DARK_PANEL,
-                foreground=DARK_FG,
-                bordercolor=DARK_BORDER,
-                lightcolor=DARK_BORDER,
-                darkcolor=DARK_BORDER,
-            )
-            style.map(
-                "Treeview",
-                background=[("selected", DARK_SELECT_BG)],
-                foreground=[("selected", DARK_SELECT_FG)],
-            )
-
-            style.configure(
-                "Treeview.Heading",
-                background=DARK_BG2,
-                foreground=DARK_ACCENT,
-                relief="flat",
-            )
-            style.map(
-                "Treeview.Heading",
-                background=[("active", DARK_PANEL2)],
-                foreground=[("active", DARK_ACCENT2)],
-            )
-        except Exception:
-            pass
-
-        # Panedwindows / scrollbars
-        try:
-            style.configure("TPanedwindow", background=DARK_BG)
-        except Exception:
-            pass
-
-        for sb in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
-            try:
-                style.configure(
-                    sb,
-                    background=DARK_BG2,
-                    troughcolor=DARK_BG,
-                    bordercolor=DARK_BORDER,
-                    arrowcolor=DARK_ACCENT,
-                )
-            except Exception:
-                pass
-
-        # Paper-mode overlay: re-apply the palette-driven subset of the styles
-        # above using the paper (blue) palette. Done last so it wins.
-        if getattr(self, "_paper_mode", False):
-            palette = get_palette(True)
-            install_classic_widget_defaults(self, palette)
-            try:
-                apply_palette_to_style(self, style, palette)
-            except tk.TclError:
-                pass
 
     # ---- paper mode ----
 
@@ -2990,7 +2733,7 @@ class PowerTraderHub(tk.Tk):
         # Account: a status row (trader, exchange, start/stop), then the figures
         # as a two-column key/value grid.
         acct_box = ttk.LabelFrame(main_container, text="Account")
-        acct_box.grid(row=0, column=0, sticky="ew", pady=(0, 3))
+        acct_box.grid(row=0, column=0, sticky="ew", pady=(0, 2))
         acct_box.grid_columnconfigure(1, weight=1)
         acct_box.grid_columnconfigure(3, weight=1)
 
@@ -3015,21 +2758,24 @@ class PowerTraderHub(tk.Tk):
         self.btn_start_trader.pack(side="right", padx=(0, 0), pady=0, ipady=0)
         ToolTip(self.btn_start_trader, "Start trader")
         ttk.Label(
-            trader_row, text="Trader:", font=("TkDefaultFont", 8), foreground=DARK_MUTED
+            trader_row,
+            text="Trader:",
+            font=ui_tokens.font("caption"),
+            foreground=DARK_MUTED,
         ).pack(side="left")
         self.lbl_trader = ttk.Label(
             trader_row,
             text="stopped",
-            font=("TkDefaultFont", 8),
+            font=ui_tokens.font("caption"),
             foreground=DARK_ACCENT2,
         )
-        self.lbl_trader.pack(side="left", padx=(3, 12))
+        self.lbl_trader.pack(side="left", padx=(2, 12))
 
         # Exchange status (click for details)
         self.lbl_exchange = ttk.Label(
             trader_row,
             text="Exchange: Checking...",
-            font=("TkDefaultFont", 8),
+            font=ui_tokens.font("caption"),
             foreground=DARK_ACCENT2,
             cursor="hand2",
         )
@@ -3037,9 +2783,12 @@ class PowerTraderHub(tk.Tk):
 
         def _figure(row: int, col: int, key: str, attr: str) -> None:
             ttk.Label(
-                acct_box, text=key, font=("TkDefaultFont", 8), foreground=DARK_MUTED
+                acct_box,
+                text=key,
+                font=ui_tokens.font("caption"),
+                foreground=DARK_MUTED,
             ).grid(row=row, column=col, sticky="w", padx=(4, 6))
-            value = ttk.Label(acct_box, text="N/A", font=("TkDefaultFont", 8))
+            value = ttk.Label(acct_box, text="N/A", font=ui_tokens.font("caption"))
             value.grid(row=row, column=col + 1, sticky="w", padx=(0, 8))
             setattr(self, attr, value)
 
@@ -3055,7 +2804,7 @@ class PowerTraderHub(tk.Tk):
         # Coins: one cell per coin (training status, trained-for, long/short
         # signal counts), with the Training and Thinking controls in its header.
         training_section = ttk.LabelFrame(main_container, text="Coins")
-        training_section.grid(row=1, column=0, sticky="ew", pady=(3, 0))
+        training_section.grid(row=1, column=0, sticky="ew", pady=(2, 0))
 
         training_title_row = ttk.Frame(training_section)
         training_title_row.pack(fill="x", padx=6, pady=(1, 0))
@@ -3064,17 +2813,17 @@ class PowerTraderHub(tk.Tk):
         ttk.Label(
             training_title_row,
             text="Training:",
-            font=("TkDefaultFont", 8),
+            font=ui_tokens.font("caption"),
             foreground=DARK_MUTED,
         ).pack(side="left")
         total_coins = len(self.coins) if self.coins else 0
         self.training_status_label = ttk.Label(
             training_title_row,
             text=f"0/{total_coins} running",
-            font=("TkDefaultFont", 8),
+            font=ui_tokens.font("caption"),
             foreground=DARK_ACCENT2,
         )
-        self.training_status_label.pack(side="left", padx=(3, 4))
+        self.training_status_label.pack(side="left", padx=(2, 4))
         # Note: TTK buttons don't support 'height' parameter, so we only use 'width'
         train_all_btn = ttk.Button(
             training_title_row,
@@ -3113,14 +2862,14 @@ class PowerTraderHub(tk.Tk):
         self.lbl_neural = ttk.Label(
             training_title_row,
             text="stopped",
-            font=("TkDefaultFont", 8),
+            font=ui_tokens.font("caption"),
             foreground=DARK_ACCENT2,
         )
-        self.lbl_neural.pack(side="right", padx=(3, 4))
+        self.lbl_neural.pack(side="right", padx=(2, 4))
         ttk.Label(
             training_title_row,
             text="Thinking:",
-            font=("TkDefaultFont", 8),
+            font=ui_tokens.font("caption"),
             foreground=DARK_MUTED,
         ).pack(side="right")
 
@@ -3129,7 +2878,7 @@ class PowerTraderHub(tk.Tk):
 
         # One cell per coin, built once per coin list and updated in place
         self.training_status_frame = ttk.Frame(training_section)
-        self.training_status_frame.pack(fill="x", padx=4, pady=(1, 3))
+        self.training_status_frame.pack(fill="x", padx=4, pady=(1, 2))
         self._training_cells: Dict[str, Tuple[Any, ...]] = {}
         # signal counts' mtime cache: path -> (mtime, value)
         self._neural_overview_cache: Dict[str, Tuple[float, Any]] = {}
@@ -3325,7 +3074,10 @@ class PowerTraderHub(tk.Tk):
         self.chart_pages_container = ttk.Frame(charts_frame)
         # Keep left padding, remove right padding so charts fill to the edge
         self.chart_pages_container.pack(  # 5 px to the panel's edges
-            fill="both", expand=True, padx=(5, 5), pady=(0, 5)
+            fill="both",
+            expand=True,
+            padx=(SPACE["edge"], SPACE["edge"]),
+            pady=(0, SPACE["edge"]),
         )
 
         self._chart_tab_buttons: Dict[str, ttk.Button] = {}
@@ -3358,6 +3110,7 @@ class PowerTraderHub(tk.Tk):
                 except Exception:
                     pass
             self._show_chart_timeframe(name)
+            self._show_chart_status(name)
 
             # Immediately refresh the newly shown coin chart so candles appear right away
             # (even if trader/neural scripts are not running yet).
@@ -3427,7 +3180,7 @@ class PowerTraderHub(tk.Tk):
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, 6), pady=(0, 6))
+        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -3449,11 +3202,16 @@ class PowerTraderHub(tk.Tk):
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, 6), pady=(0, 6))
+            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
-                page, self.fetcher, coin, self._settings_getter, self.trade_history_path
+                page,
+                self.fetcher,
+                coin,
+                self._settings_getter,
+                self.trade_history_path,
+                status_parent=self._chart_status_slot,
             )
             chart.pack(fill="both", expand=True)
             self.charts[coin] = chart
@@ -3677,7 +3435,7 @@ class PowerTraderHub(tk.Tk):
             fg=DARK_FG,
             selectbackground=DARK_ACCENT2,
             selectforeground=DARK_FG,
-            font=("Consolas", 9),
+            font=ui_tokens.mono("small"),
         )
 
         # Add scrollbars for hist_list
@@ -3770,8 +3528,10 @@ class PowerTraderHub(tk.Tk):
 
                 min_top = 360
                 min_bottom = 220
-                # Set Charts to exactly 50% of window height
-                target = total // 2  # Split exactly in half
+                # Charts at half the window height, less the status row that moved
+                # into the tab row (owner, 2026-10-14): the chart keeps its height
+                # and the panel below gains the row's
+                target = total // 2 - self._moved_status_row_px()
                 target = max(min_top, min(total - min_bottom, target))
 
                 right_split.sashpos(0, int(target))
@@ -4001,7 +3761,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     order_tab,
                     text="Order Management System Not Available\n\nSQLAlchemy dependency required for full functionality.\nInstall with: pip install sqlalchemy",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 return
@@ -4559,7 +4319,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     research_tab,
                     text="LLM Research Engine Not Available\n\nRequired dependencies missing.\nPlease check imports and dependencies.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 print("LLM Research Engine not available")
@@ -4590,7 +4350,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     research_tab,
                     text=f"LLM Research Engine Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -4612,7 +4372,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     holdings_tab,
                     text="Holdings Management Not Available\n\nRequired dependencies missing.\nPlease install: pip install sqlite3",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 print("Holdings Management not available")
@@ -4631,7 +4391,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     holdings_tab,
                     text=f"Holdings Management Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -4653,7 +4413,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     analytics_tab,
                     text="Portfolio Analytics Not Available\n\nRequired dependencies missing.\nPlease install: pip install pandas numpy matplotlib seaborn",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 print("Portfolio Analytics not available")
@@ -4672,7 +4432,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     analytics_tab,
                     text=f"Portfolio Analytics Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -4694,7 +4454,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     advanced_order_tab,
                     text="Advanced Order Types Not Available\n\nRequired dependencies missing.\nPlease install advanced order automation module.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 print("Advanced Order Types not available")
@@ -4713,7 +4473,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     advanced_order_tab,
                     text=f"Advanced Orders Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -4735,7 +4495,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     market_data_tab,
                     text="Real-time Market Data Not Available\n\nRequired dependencies missing.\nPlease install real-time market data module.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 print("Real-time Market Data not available")
@@ -4754,7 +4514,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     market_data_tab,
                     text=f"Market Data Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -4776,7 +4536,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     portfolio_opt_tab,
                     text="Portfolio Optimization Engine\n\nFor enhanced optimization features, install optional dependencies:\n\npython app/install_optional_deps.py\n\nCore features available without optional packages.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                     justify="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
@@ -4798,7 +4558,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     portfolio_opt_tab,
                     text=f"Portfolio Optimization Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -4820,7 +4580,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     backtest_tab,
                     text="Backtesting Framework\n\nFor enhanced backtesting features, install optional dependencies:\n\npython app/install_optional_deps.py\n\nCore features available without optional packages.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 print("Backtesting Framework available with limited functionality")
@@ -4839,7 +4599,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     backtest_tab,
                     text=f"Backtesting Framework Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -4861,7 +4621,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     attribution_tab,
                     text="Performance Attribution Engine\n\nFor enhanced attribution analysis features, install optional dependencies:\n\npython app/install_optional_deps.py\n\nCore features available without optional packages.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 print(
@@ -4884,7 +4644,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     attribution_tab,
                     text=f"Performance Attribution Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -4906,7 +4666,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     institutional_tab,
                     text="Institutional Trading System\n\nEnterprise-grade trading infrastructure with:\n• High-volume order processing\n• Advanced algorithmic execution (TWAP, VWAP, Iceberg)\n• Institutional risk management\n• Batch order processing\n• Performance monitoring\n• Compliance reporting\n\nSystem is initializing...",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
                 print("Institutional Trading System loading...")
@@ -4925,7 +4685,7 @@ class PowerTraderHub(tk.Tk):
                 ttk.Label(
                     institutional_tab,
                     text=f"Institutional Trading Error\n\n{str(e)}\n\nPlease check console for details.",
-                    font=("TkDefaultFont", 10),
+                    font=ui_tokens.font("body"),
                     anchor="center",
                 ).pack(expand=True, fill="both", padx=20, pady=20)
             except Exception:
@@ -5023,13 +4783,13 @@ class PowerTraderHub(tk.Tk):
         ttk.Label(
             header_frame,
             text="PowerTrader Dependency Status",
-            font=("TkDefaultFont", 14, "bold"),
+            font=ui_tokens.font("display", "bold"),
         ).pack()
 
         ttk.Label(
             header_frame,
             text=f"Dependencies: {available_count}/{total_count} available",
-            font=("TkDefaultFont", 10),
+            font=ui_tokens.font("body"),
         ).pack()
 
         # Status indicators
@@ -5038,7 +4798,11 @@ class PowerTraderHub(tk.Tk):
 
         # Create scrolled text for status
         status_text = tk.Text(
-            status_frame, height=15, bg=DARK_PANEL, fg=DARK_FG, font=("Consolas", 10)
+            status_frame,
+            height=15,
+            bg=DARK_PANEL,
+            fg=DARK_FG,
+            font=ui_tokens.mono("body"),
         )
         status_scrollbar = ttk.Scrollbar(
             status_frame, orient=tk.VERTICAL, command=status_text.yview
@@ -5142,7 +4906,7 @@ class PowerTraderHub(tk.Tk):
         ttk.Label(
             header_frame,
             text="Installation Instructions",
-            font=("TkDefaultFont", 12, "bold"),
+            font=ui_tokens.font("title", "bold"),
         ).pack()
 
         # Install script text area
@@ -5154,7 +4918,7 @@ class PowerTraderHub(tk.Tk):
             height=15,
             bg=DARK_PANEL,
             fg=DARK_FG,
-            font=("Consolas", 9),
+            font=ui_tokens.mono("small"),
             wrap=tk.WORD,
         )
         script_scrollbar = ttk.Scrollbar(
@@ -5928,13 +5692,13 @@ Platform: {sys.platform}
             cell = tk.Frame(frame, bg=bg, cursor="hand2")
             tight = {"bg": bg, "bd": 0, "padx": 0, "pady": 0}
             dot = tk.Label(
-                cell, text="●", fg=STATUS_IDLE, font=("TkDefaultFont", 9), **tight
+                cell, text="●", fg=STATUS_IDLE, font=ui_tokens.font("small"), **tight
             )
             sym = tk.Label(
                 cell,
                 text=coin,
                 fg=DARK_FG,
-                font=("TkDefaultFont", 8, "bold"),
+                font=ui_tokens.font("caption", "bold"),
                 width=5,
                 anchor="w",
                 **tight,
@@ -5943,7 +5707,7 @@ Platform: {sys.platform}
                 cell,
                 text="",
                 fg=DARK_MUTED,
-                font=("TkDefaultFont", 7),
+                font=ui_tokens.font("micro"),
                 width=7,
                 anchor="w",
                 **tight,
@@ -5952,13 +5716,13 @@ Platform: {sys.platform}
                 cell,
                 text="–",
                 fg=DARK_MUTED,
-                font=("TkDefaultFont", 7, "bold"),
+                font=ui_tokens.font("micro", "bold"),
                 width=6,
                 anchor="w",
                 **tight,
             )
             dot.pack(side="left")
-            sym.pack(side="left", padx=(3, 2))
+            sym.pack(side="left", padx=2)
             age.pack(side="left")
             sig.pack(side="left")
             handler = self._make_coin_click_handler(coin)
@@ -6166,7 +5930,7 @@ Platform: {sys.platform}
     def _get_training_age_status(self, coin: str) -> tuple:
         """Get training age status (color, text) for a coin."""
         if coin not in self.last_training_times:
-            return "#ff6b6b", "Never"  # Red for never trained
+            return STATUS_RED, "Never"
 
         last_time = self.last_training_times[coin]
         current_time = time.time()
@@ -6176,11 +5940,11 @@ Platform: {sys.platform}
         auto_interval_hours = self.settings.get("training_auto_interval_hours", 6)
 
         if age_hours < stale_warning_hours:
-            return "#51da4c", f"{age_hours:.1f}h"  # Green for fresh
+            return STATUS_GREEN, f"{age_hours:.1f}h"  # fresh
         elif age_hours < auto_interval_hours:
-            return "#ffa726", f"{age_hours:.1f}h"  # Orange for aging
+            return STATUS_AMBER, f"{age_hours:.1f}h"  # ageing
         else:
-            return "#ff6b6b", f"{age_hours:.1f}h"  # Red for stale
+            return STATUS_RED, f"{age_hours:.1f}h"  # stale
 
     def _load_existing_training_times(self) -> None:
         """Load existing training completion times from timestamp files."""
@@ -7373,7 +7137,7 @@ Platform: {sys.platform}
         scrolls sideways when the panel is too narrow for it, and the Timeframe box
         anchored at the right end, never overlapping the buttons."""
         row = ttk.Frame(charts_frame)
-        row.pack(fill="x", padx=(5, 5), pady=(6, 0))
+        row.pack(fill="x", padx=(SPACE["edge"], SPACE["edge"]), pady=(SPACE["sm"], 0))
         self._chart_tabs_row = row
         # the Chart settings cog at the far right, the Timeframe box to its left
         cog = ttk.Button(
@@ -7382,7 +7146,7 @@ Platform: {sys.platform}
             style="ChartCog.TButton",
             command=self.open_chart_settings,
         )
-        cog.pack(side="right", anchor="n", pady=(0, 6))
+        cog.pack(side="right", anchor="n", pady=(0, SPACE["xs"]))
         ToolTip(cog, "Chart settings")
         self.chart_settings_button = cog
         box = ttk.Frame(row)
@@ -7397,14 +7161,81 @@ Platform: {sys.platform}
         combo.bind("<<ComboboxSelected>>", self._on_chart_timeframe_selected)
         self._chart_tf_box, self.chart_tf_combo = box, combo
         self._pack_chart_tf_box()  # packed first, so the buttons get what is left
+        # The buttons, then the selected chart's status line straight after them
+        # (owner, 2026-10-14). The buttons are only as wide as their content or what
+        # the status, the Timeframe box and the cog leave, so they scroll first.
         self.chart_tabs_bar = ScrollingRow(row)
-        self.chart_tabs_bar.pack(side="left", fill="x", expand=True)
+        self.chart_tabs_bar.pack(side="left", anchor="n")
+        self._chart_status_slot = ttk.Frame(row)
+        self._chart_status_slot.pack(
+            side="left",
+            anchor="n",
+            padx=(SPACE["sm"], 0),
+            pady=(STATUS_TEXT_DROP, SPACE["xs"]),
+        )
+        for widget in (row, self._chart_status_slot, self.chart_tabs_bar.inner):
+            widget.bind("<Configure>", self._fit_chart_tab_row, add="+")
+
+    def _fit_chart_tab_row(self, event=None) -> None:
+        """Give the buttons what the row has left after the status line, the
+        Timeframe box and the cog, up to their full width; short of that they
+        scroll."""
+        row = getattr(self, "_chart_tabs_row", None)
+        bar = getattr(self, "chart_tabs_bar", None)
+        if row is None or bar is None:
+            return
+        try:
+            avail = int(row.winfo_width())
+            if avail <= 1:
+                return
+            used = 0
+            for widget in row.pack_slaves():
+                if widget is bar:
+                    continue
+                padx = widget.pack_info().get("padx", 0)
+                pads = sum(padx) if isinstance(padx, tuple) else 2 * int(padx)
+                used += int(widget.winfo_reqwidth()) + pads
+            bar.set_width(max(60, min(bar.inner.winfo_reqwidth(), avail - used)))
+        except Exception:
+            pass
+
+    def _show_chart_status(self, name: str) -> None:
+        """The selected coin chart's status line, in the tab row. The account chart
+        has none."""
+        for coin, chart in getattr(self, "charts", {}).items():
+            frame = getattr(chart, "status_frame", None)
+            if frame is None or frame.master is not getattr(
+                self, "_chart_status_slot", None
+            ):
+                continue
+            try:
+                if coin == name:
+                    if frame.winfo_manager() != "pack":
+                        frame.pack(side="left")
+                elif frame.winfo_manager():
+                    frame.pack_forget()
+            except Exception:
+                pass
+        self._fit_chart_tab_row()
+
+    def _moved_status_row_px(self) -> int:
+        """Height the coin charts' status row used to take above the plot (a label
+        and 6 px above and below it), plus the 2 px less gap under the buttons."""
+        try:
+            label = next(iter(self.charts.values())).neural_status_label
+            return int(label.winfo_reqheight()) + 2 * 6 + 2
+        except Exception:
+            return 0
 
     def _pack_chart_tf_box(self) -> None:
         bar = getattr(self, "chart_tabs_bar", None)
         before = {"before": bar} if bar is not None and bar.winfo_exists() else {}
         self._chart_tf_box.pack(
-            side="right", anchor="n", padx=(8, 6), pady=(6, 6), **before
+            side="right",
+            anchor="n",
+            padx=(SPACE["md"], SPACE["sm"]),
+            pady=(SPACE["sm"], SPACE["xs"]),
+            **before,
         )  # level with the buttons, also while the scrollbar shows
 
     def _show_chart_timeframe(self, name: str) -> None:
@@ -7469,7 +7300,10 @@ Platform: {sys.platform}
 
         self.chart_pages_container = ttk.Frame(charts_frame)
         self.chart_pages_container.pack(  # 5 px to the panel's edges
-            fill="both", expand=True, padx=(5, 5), pady=(0, 5)
+            fill="both",
+            expand=True,
+            padx=(SPACE["edge"], SPACE["edge"]),
+            pady=(0, SPACE["edge"]),
         )
 
         self._chart_tab_buttons = {}
@@ -7499,6 +7333,7 @@ Platform: {sys.platform}
                 except Exception:
                     pass
             self._show_chart_timeframe(name)
+            self._show_chart_status(name)
 
         self._show_chart_page = _show_page
 
@@ -7512,7 +7347,7 @@ Platform: {sys.platform}
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, 6), pady=(0, 6))
+        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -7534,11 +7369,16 @@ Platform: {sys.platform}
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, 6), pady=(0, 6))
+            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
-                page, self.fetcher, coin, self._settings_getter, self.trade_history_path
+                page,
+                self.fetcher,
+                coin,
+                self._settings_getter,
+                self.trade_history_path,
+                status_parent=self._chart_status_slot,
             )
             chart.pack(fill="both", expand=True)
             self.charts[coin] = chart
@@ -7932,7 +7772,7 @@ Platform: {sys.platform}
         ttk.Label(
             frm,
             text="🌍 Exchange Provider Settings",
-            font=("TkDefaultFont", 10, "bold"),
+            font=ui_tokens.font("body", "bold"),
         ).grid(row=r, column=0, columnspan=3, sticky="w", pady=(10, 5))
         r += 1
 
@@ -8068,10 +7908,10 @@ Platform: {sys.platform}
         r += 1
         for label, folder in self._user_folder_rows():
             ttk.Label(frm, text=label).grid(
-                row=r, column=0, sticky="w", padx=(0, 10), pady=3
+                row=r, column=0, sticky="w", padx=(0, 10), pady=4
             )
             path_row = ttk.Frame(frm)
-            path_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
+            path_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=4)
             path_row.columnconfigure(0, weight=1)
             path_entry = ttk.Entry(path_row)
             path_entry.insert(0, folder)
@@ -8181,7 +8021,7 @@ Platform: {sys.platform}
         r += 1
 
         btns = ttk.Frame(frm)
-        btns.grid(row=r, column=0, columnspan=3, sticky="ew", pady=14)
+        btns.grid(row=r, column=0, columnspan=3, sticky="ew", pady=12)
         btns.columnconfigure(0, weight=1)
 
         def save():

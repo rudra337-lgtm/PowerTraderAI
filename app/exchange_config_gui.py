@@ -14,6 +14,8 @@ from typing import Dict, Optional
 
 import coinbase_auth
 import pt_secrets
+import ui_theme
+import ui_tokens
 from pt_exchange_abstraction import (
     ConnectionStatus,
     ConnectionTestResult,
@@ -100,20 +102,13 @@ class ExchangeConfigGUI:
         self.window.geometry("1000x800")
         self.window.minsize(900, 700)
 
-        # Configure dark theme colors (matching main hub)
-        self.DARK_BG = "#070B10"
-        self.DARK_BG2 = "#0B1220"
-        self.DARK_PANEL = "#0E1626"
-        self.DARK_PANEL2 = "#121C2F"
-        self.DARK_BORDER = "#243044"
-        self.DARK_FG = "#C7D1DB"
-        self.DARK_MUTED = "#8B949E"
-        self.DARK_ACCENT = "#00FF66"
-        self.DARK_ACCENT2 = "#00E5FF"
-        self.DARK_SELECT_BG = "#17324A"
-        self.DARK_SELECT_FG = "#00FF66"
-
-        self.window.configure(bg=self.DARK_BG)
+        # Opened from the hub, the window takes the hub's palette (dark, or blue in
+        # paper mode): ttk styles are shared by the whole process, so it never
+        # configures them itself. Run on its own, it builds the dark theme.
+        if not parent:
+            ui_theme.apply_theme(self.window, ttk.Style(self.window), ui_tokens.DARK)
+        self.p = ui_theme.active_palette()
+        self.window.configure(bg=self.p["BG"])
 
         # Initialize exchange configuration
         self.config_manager = ExchangeConfigManager()
@@ -121,9 +116,6 @@ class ExchangeConfigGUI:
 
         # Load comprehensive exchange list
         self.all_exchanges = self.load_all_supported_exchanges()
-
-        # Apply dark theme styling first
-        self.apply_dark_theme()
 
         self.setup_gui()
         self.refresh_exchange_list()
@@ -228,154 +220,6 @@ class ExchangeConfigGUI:
 
         return exchanges_list
 
-    def apply_dark_theme(self):
-        """Apply consistent dark theme to all widgets"""
-        # Configure ttk styles to match main hub
-        style = ttk.Style()
-        style.theme_use("clam")
-
-        # Configure notebook
-        style.configure(
-            "TNotebook", background=self.DARK_BG, borderwidth=0, tabmargins=[2, 5, 2, 0]
-        )
-        style.configure(
-            "TNotebook.Tab",
-            background=self.DARK_PANEL,
-            foreground=self.DARK_FG,
-            padding=[12, 8],
-            borderwidth=1,
-            focuscolor="none",
-        )
-        style.map(
-            "TNotebook.Tab",
-            background=[
-                ("selected", self.DARK_PANEL2),
-                ("active", self.DARK_SELECT_BG),
-            ],
-            foreground=[("selected", self.DARK_ACCENT)],
-        )
-
-        # Configure frames and labels
-        style.configure("TFrame", background=self.DARK_BG)
-        style.configure(
-            "TLabelFrame",
-            background=self.DARK_BG,
-            foreground=self.DARK_ACCENT,
-            borderwidth=1,
-            relief="solid",
-            bordercolor=self.DARK_BORDER,
-        )
-        style.configure("TLabel", background=self.DARK_BG, foreground=self.DARK_FG)
-
-        # Configure treeview
-        style.configure(
-            "Treeview",
-            background=self.DARK_PANEL,
-            foreground=self.DARK_FG,
-            fieldbackground=self.DARK_PANEL,
-            borderwidth=1,
-            relief="solid",
-        )
-        style.configure(
-            "Treeview.Heading",
-            background=self.DARK_PANEL2,
-            foreground=self.DARK_ACCENT,
-            borderwidth=1,
-            relief="solid",
-        )
-        style.map(
-            "Treeview",
-            background=[("selected", self.DARK_SELECT_BG)],
-            foreground=[("selected", self.DARK_SELECT_FG)],
-        )
-        style.map("Treeview.Heading", background=[("active", self.DARK_SELECT_BG)])
-
-        # Configure buttons
-        style.configure(
-            "TButton",
-            background=self.DARK_PANEL,
-            foreground=self.DARK_FG,
-            borderwidth=1,
-            focuscolor="none",
-            relief="solid",
-        )
-        style.map(
-            "TButton",
-            background=[("active", self.DARK_SELECT_BG), ("pressed", self.DARK_ACCENT)],
-            foreground=[("active", self.DARK_ACCENT), ("pressed", self.DARK_BG)],
-        )
-
-        # Configure entry and combobox
-        style.configure(
-            "TEntry",
-            fieldbackground=self.DARK_PANEL,
-            foreground=self.DARK_FG,
-            borderwidth=1,
-            insertcolor=self.DARK_FG,
-            relief="solid",
-        )
-        style.map(
-            "TEntry",
-            focuscolor=[("!focus", self.DARK_BORDER)],
-            bordercolor=[("focus", self.DARK_ACCENT)],
-        )
-
-        style.configure(
-            "TCombobox",
-            fieldbackground=self.DARK_PANEL,
-            foreground=self.DARK_FG,
-            borderwidth=1,
-            selectbackground=self.DARK_SELECT_BG,
-            selectforeground=self.DARK_SELECT_FG,
-            relief="solid",
-        )
-        style.map(
-            "TCombobox",
-            focuscolor=[("!focus", self.DARK_BORDER)],
-            bordercolor=[("focus", self.DARK_ACCENT)],
-        )
-
-        # Configure scrollbars
-        style.configure(
-            "TScrollbar",
-            background=self.DARK_PANEL,
-            troughcolor=self.DARK_BG,
-            borderwidth=1,
-            arrowcolor=self.DARK_FG,
-            relief="solid",
-        )
-        style.map("TScrollbar", background=[("active", self.DARK_SELECT_BG)])
-
-        # Configure separator
-        style.configure("TSeparator", background=self.DARK_BORDER)
-
-        # Configure checkboxes and radiobuttons
-        style.configure(
-            "TCheckbutton",
-            background=self.DARK_BG,
-            foreground=self.DARK_FG,
-            focuscolor="none",
-            borderwidth=0,
-        )
-        style.map(
-            "TCheckbutton",
-            background=[("active", self.DARK_BG)],
-            foreground=[("active", self.DARK_ACCENT)],
-        )
-
-        style.configure(
-            "TRadiobutton",
-            background=self.DARK_BG,
-            foreground=self.DARK_FG,
-            focuscolor="none",
-            borderwidth=0,
-        )
-        style.map(
-            "TRadiobutton",
-            background=[("active", self.DARK_BG)],
-            foreground=[("active", self.DARK_ACCENT)],
-        )
-
     def setup_gui(self):
         """Set up the main GUI layout"""
         # Main container
@@ -389,8 +233,8 @@ class ExchangeConfigGUI:
         title_label = ttk.Label(
             title_frame,
             text="🚀 Exchange Configuration Manager",
-            font=("Arial", 16, "bold"),
-            foreground=self.DARK_ACCENT,
+            font=ui_tokens.font("display", "bold"),
+            foreground=self.p["ACCENT"],
         )
         title_label.pack(side=tk.LEFT)
 
@@ -413,8 +257,8 @@ class ExchangeConfigGUI:
             main_frame,
             textvariable=self.status_var,
             relief=tk.SUNKEN,
-            bg=self.DARK_PANEL,
-            fg=self.DARK_FG,
+            bg=self.p["PANEL"],
+            fg=self.p["FG"],
             borderwidth=1,
         )
         status_bar.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
@@ -429,7 +273,9 @@ class ExchangeConfigGUI:
         header_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ttk.Label(
-            header_frame, text="Available Exchanges", font=("Arial", 12, "bold")
+            header_frame,
+            text="Available Exchanges",
+            font=ui_tokens.font("title", "bold"),
         ).pack(side=tk.LEFT)
 
         refresh_btn = ttk.Button(
@@ -472,7 +318,7 @@ class ExchangeConfigGUI:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Control buttons
-        button_frame = tk.Frame(list_frame, bg=self.DARK_BG)
+        button_frame = tk.Frame(list_frame, bg=self.p["BG"])
         button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         ttk.Button(
@@ -497,18 +343,18 @@ class ExchangeConfigGUI:
 
     def setup_exchange_setup_tab(self):
         """Set up the exchange configuration tab"""
-        setup_frame = tk.Frame(self.notebook, bg=self.DARK_BG)
+        setup_frame = tk.Frame(self.notebook, bg=self.p["BG"])
         self.notebook.add(setup_frame, text="⚙️ Setup Exchange")
 
         # Exchange selection
         select_frame = tk.LabelFrame(
             setup_frame,
             text="Select Exchange",
-            bg=self.DARK_BG,
-            fg=self.DARK_ACCENT,
+            bg=self.p["BG"],
+            fg=self.p["ACCENT"],
             bd=1,
             relief="solid",
-            highlightbackground=self.DARK_BORDER,
+            highlightbackground=self.p["BORDER"],
         )
         select_frame.pack(fill=tk.X, padx=10, pady=10)
 
@@ -527,11 +373,11 @@ class ExchangeConfigGUI:
         self.config_frame = tk.LabelFrame(
             setup_frame,
             text="Configuration",
-            bg=self.DARK_BG,
-            fg=self.DARK_ACCENT,
+            bg=self.p["BG"],
+            fg=self.p["ACCENT"],
             bd=1,
             relief="solid",
-            highlightbackground=self.DARK_BORDER,
+            highlightbackground=self.p["BORDER"],
         )
         self.config_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
@@ -540,12 +386,12 @@ class ExchangeConfigGUI:
             self.config_frame,
             height=8,
             wrap=tk.WORD,
-            bg=self.DARK_PANEL,
-            fg=self.DARK_FG,
-            font=("Consolas", 10),
-            insertbackground=self.DARK_ACCENT,
-            selectbackground=self.DARK_SELECT_BG,
-            selectforeground=self.DARK_SELECT_FG,
+            bg=self.p["PANEL"],
+            fg=self.p["FG"],
+            font=ui_tokens.mono("body"),
+            insertbackground=self.p["ACCENT"],
+            selectbackground=self.p["SELECT_BG"],
+            selectforeground=self.p["SELECT_FG"],
             borderwidth=1,
             relief="solid",
             highlightthickness=0,
@@ -553,7 +399,7 @@ class ExchangeConfigGUI:
         self.instructions_text.pack(fill=tk.X, padx=10, pady=(10, 0))
 
         # Credentials input frame
-        creds_frame = tk.Frame(self.config_frame, bg=self.DARK_BG)
+        creds_frame = tk.Frame(self.config_frame, bg=self.p["BG"])
         creds_frame.pack(fill=tk.X, padx=10, pady=10)
 
         # API Key
@@ -582,10 +428,10 @@ class ExchangeConfigGUI:
             width=50,
             height=7,
             wrap=tk.NONE,
-            bg=self.DARK_PANEL,
-            fg=self.DARK_FG,
-            font=("Consolas", 9),
-            insertbackground=self.DARK_ACCENT,
+            bg=self.p["PANEL"],
+            fg=self.p["FG"],
+            font=ui_tokens.mono("small"),
+            insertbackground=self.p["ACCENT"],
             borderwidth=1,
             relief="solid",
             highlightthickness=0,
@@ -605,7 +451,7 @@ class ExchangeConfigGUI:
         creds_frame.columnconfigure(1, weight=1)
 
         # Save button
-        save_button_frame = tk.Frame(self.config_frame, bg=self.DARK_BG)
+        save_button_frame = tk.Frame(self.config_frame, bg=self.p["BG"])
         save_button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         ttk.Button(
@@ -622,11 +468,11 @@ class ExchangeConfigGUI:
 
     def setup_testing_tab(self):
         """Set up the connection testing tab"""
-        test_frame = tk.Frame(self.notebook, bg=self.DARK_BG)
+        test_frame = tk.Frame(self.notebook, bg=self.p["BG"])
         self.notebook.add(test_frame, text="🧪 Test Connections")
 
         # Test all button
-        test_all_frame = tk.Frame(test_frame, bg=self.DARK_BG)
+        test_all_frame = tk.Frame(test_frame, bg=self.p["BG"])
         test_all_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ttk.Button(
@@ -639,22 +485,22 @@ class ExchangeConfigGUI:
         results_frame = tk.LabelFrame(
             test_frame,
             text="Test Results",
-            bg=self.DARK_BG,
-            fg=self.DARK_ACCENT,
+            bg=self.p["BG"],
+            fg=self.p["ACCENT"],
             bd=1,
             relief="solid",
-            highlightbackground=self.DARK_BORDER,
+            highlightbackground=self.p["BORDER"],
         )
         results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
         self.results_text = tk.Text(
             results_frame,
-            bg=self.DARK_PANEL,
-            fg=self.DARK_FG,
-            font=("Consolas", 10),
-            insertbackground=self.DARK_ACCENT,
-            selectbackground=self.DARK_SELECT_BG,
-            selectforeground=self.DARK_SELECT_FG,
+            bg=self.p["PANEL"],
+            fg=self.p["FG"],
+            font=ui_tokens.mono("body"),
+            insertbackground=self.p["ACCENT"],
+            selectbackground=self.p["SELECT_BG"],
+            selectforeground=self.p["SELECT_FG"],
             borderwidth=1,
             relief="solid",
             highlightthickness=0,
