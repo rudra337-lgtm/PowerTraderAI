@@ -114,7 +114,19 @@ def test_banner_text_is_readable():
 
 
 def test_the_type_scale_and_spacing_scale():
-    assert ui_tokens.font("caption", "bold") == (ui_tokens.FAMILY, 8, "bold")
+    names = {
+        ui_tokens.font(role, *styles)
+        for role in ui_tokens.FONT_SIZES
+        for styles in ((), ("bold",), ("italic",), ("bold", "italic"))
+    }
+    assert len(names) == 4 * len(ui_tokens.FONT_SIZES)  # one font per role and style
+    assert ui_tokens.font("body", "italic", "bold") == ui_tokens.font(
+        "body", "bold", "italic"
+    )
+    with pytest.raises(KeyError):
+        ui_tokens.font("huge")
+    with pytest.raises(ValueError):
+        ui_tokens.font("body", "underline")
     assert ui_tokens.mono("small") == (ui_tokens.MONO_FAMILY, 9)
     sizes = list(ui_tokens.FONT_SIZES.values())
     assert sizes == sorted(sizes)
@@ -310,7 +322,11 @@ def test_fonts_use_the_system_family_and_tooltips_the_theme(tk_root):
     p = ui_tokens.PAPER
     ui_theme.apply_theme(tk_root, ttk.Style(tk_root), p)
     family = tkfont.nametofont("TkDefaultFont", root=tk_root).actual("family")
-    assert ui_tokens.FAMILY == family  # not Arial, the fallback for "TkDefaultFont"
+    caption = tkfont.Font(root=tk_root, name=ui_tokens.font("caption", "bold"), exists=True)
+    # not Arial, Tk's fallback for a tuple naming "TkDefaultFont" as its family
+    assert caption.actual("family") == family
+    assert caption.actual("weight") == "bold"
+    assert caption.actual("size") == ui_tokens.FONT_SIZES["caption"]
     widget = ttk.Label(tk_root, text="x")
     widget.pack()
     tip = pt_hub.ToolTip(widget, "explained")
@@ -322,6 +338,25 @@ def test_fonts_use_the_system_family_and_tooltips_the_theme(tk_root):
         family
     )
     tip.on_leave()
+
+
+def test_applying_the_theme_leaves_the_tokens_unchanged(tk_root):
+    """apply_theme used to write the system family into ui_tokens.FAMILY, so a font
+    built before it (or in a window that never applied it) was Arial, and the value
+    carried over from one test to the next."""
+    import copy
+
+    import ui_theme
+    from tkinter import ttk
+
+    before = {
+        k: copy.deepcopy(v)
+        for k, v in vars(ui_tokens).items()
+        if not k.startswith("__") and not callable(v)
+    }
+    ui_theme.apply_theme(tk_root, ttk.Style(tk_root), ui_tokens.PAPER)
+    after = {k: v for k, v in vars(ui_tokens).items() if k in before}
+    assert after == before
 
 
 # --- states: no light clam colour leaks in any state ---------------------------------

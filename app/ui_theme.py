@@ -30,6 +30,9 @@ matplotlib figure the chart surfaces from ui_tokens.CHART.
 
 A feature window run on its own builds its root with themed_root(), so it looks
 as it does inside the hub.
+
+Fonts: ui_tokens.font() names a Tk named font, which install_fonts() (run by
+apply_theme) creates in each Tk interpreter in the system UI family.
 """
 
 import tkinter as tk
@@ -48,16 +51,32 @@ def active_palette() -> Dict[str, str]:
     return _active
 
 
-def _use_system_family(root: tk.Misc) -> None:
-    """Point the type scale at the system UI family (Segoe UI on Windows), the one
-    widgets without an explicit font already use. A tuple naming "TkDefaultFont"
-    is not a family, and Tk falls back to Arial for it."""
+def install_fonts(root: tk.Misc) -> None:
+    """Create, or update, the type scale's named fonts (ui_tokens.font) in root's
+    Tk interpreter, in the system UI family: the family of Tk's own default font,
+    which widgets without a font of their own use (Segoe UI on Windows)."""
     try:
-        ui_tokens.FAMILY = tkfont.nametofont("TkDefaultFont", root=root).actual(
-            "family"
-        )
-    except Exception:
-        pass
+        family = tkfont.nametofont("TkDefaultFont", root=root).actual("family")
+        existing = set(root.tk.splitlist(root.tk.call("font", "names")))
+    except tk.TclError:
+        return
+    combos = [()] + [(s,) for s in ui_tokens.FONT_STYLES] + [ui_tokens.FONT_STYLES]
+    for role, size in ui_tokens.FONT_SIZES.items():
+        for styles in combos:
+            name = ui_tokens.font(role, *styles)
+            root.tk.call(
+                "font",
+                "configure" if name in existing else "create",
+                name,
+                "-family",
+                family,
+                "-size",
+                size,
+                "-weight",
+                "bold" if "bold" in styles else "normal",
+                "-slant",
+                "italic" if "italic" in styles else "roman",
+            )
 
 
 def install_classic_defaults(root: tk.Misc, p: Dict[str, str]) -> None:
@@ -139,7 +158,7 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
     """Style every widget the hub uses from palette ``p``."""
     global _active
     _active = p
-    _use_system_family(root)
+    install_fonts(root)
     try:
         root.configure(bg=p["BG"])
     except tk.TclError:
