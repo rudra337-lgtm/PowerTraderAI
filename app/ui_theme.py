@@ -233,11 +233,11 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         focuscolor=p["ACCENT"],
         padding=(3, 2),
     )
-    style.map(
+    style.map(  # the first matching state wins, and a pressed button is also active
         "TButton",
         background=[
-            ("active", p["PANEL2"]),
             ("pressed", p["PANEL"]),
+            ("active", p["PANEL2"]),
             ("disabled", p["BG2"]),
         ],
         foreground=[("active", p["ACCENT"]), ("disabled", p["MUTED"])],
@@ -351,7 +351,7 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
     )
     style.map(
         "ChartTab.TButton",
-        background=[("active", p["PANEL2"]), ("pressed", p["PANEL"])],
+        background=[("pressed", p["PANEL"]), ("active", p["PANEL2"])],
         foreground=[("active", p["ACCENT2"])],
         bordercolor=[("active", p["ACCENT2"]), ("focus", p["ACCENT"])],
     )

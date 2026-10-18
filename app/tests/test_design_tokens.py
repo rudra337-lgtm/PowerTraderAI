@@ -419,6 +419,29 @@ def test_text_is_readable_in_every_state(tk_root, name):
     assert not low
 
 
+def test_a_pressed_button_shows_its_pressed_colours(tk_root):
+    """ttk takes the first state in a map that matches, and a button under the mouse
+    is both active and pressed: with "active" listed first, TButton and the chart
+    tabs never showed their pressed colour."""
+    import ui_theme
+    from tkinter import ttk
+
+    style = ttk.Style(tk_root)
+    ui_theme.apply_theme(tk_root, style, ui_tokens.DARK)
+    hidden = []
+    for widget_style in STATE_STYLES:
+        for option in COLOURS:
+            pressed = style.lookup(widget_style, option, ["pressed"])
+            if pressed == style.lookup(widget_style, option):
+                continue  # no pressed colour of its own
+            if style.lookup(widget_style, option, ["active", "pressed"]) != pressed:
+                hidden.append((widget_style, option))
+    assert not hidden
+    assert style.lookup("TButton", "background", ["active", "pressed"]) == (
+        ui_tokens.DARK["PANEL"]
+    )
+
+
 def test_disabled_fields_look_disabled(tk_root):
     import ui_theme
     from tkinter import ttk
