@@ -1156,6 +1156,18 @@ class CandleChart(ttk.Frame):
 
         self.pattern_layer = PatternLayer(self, status_label=self.patterns_status_label)
 
+    def destroy(self) -> None:
+        """In the hub the status line is a child of the tab row, not of the chart:
+        it goes with the chart, or it would stay in the row, its pattern label
+        calling into a destroyed chart."""
+        frame = getattr(self, "status_frame", None)
+        if frame is not None and frame.master is not self:
+            try:
+                frame.destroy()
+            except tk.TclError:
+                pass
+        super().destroy()
+
     def set_timeframe(self, tf: str) -> None:
         """Show ``tf``, chosen in the hub's Timeframe box. Rapid changes are debounced
         so redraws don't stack."""

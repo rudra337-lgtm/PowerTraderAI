@@ -555,6 +555,19 @@ def test_the_status_line_sits_in_the_tab_row_after_the_buttons(hub):
     assert slot.pack_slaves() == []
 
 
+def test_a_destroyed_chart_takes_its_status_line_with_it(hub):
+    """The status line is a child of the tab row, so destroying one chart on its own
+    left it packed in the row, next to the next chart's."""
+    coin = hub.coins[0]
+    hub._show_chart_page(coin)
+    chart = hub.charts[coin]
+    frame = chart.status_frame
+    assert hub._chart_status_slot.pack_slaves() == [frame]
+    chart.destroy()
+    assert not frame.winfo_exists()
+    assert hub._chart_status_slot.pack_slaves() == []
+
+
 def test_the_buttons_shrink_before_the_status_line(hub):
     hub._show_chart_page(hub.coins[0])
     hub.update_idletasks()
