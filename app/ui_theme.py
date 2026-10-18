@@ -163,6 +163,11 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         # the dotted keyboard-focus ring of check boxes, radio buttons and notebook
         # tabs; ttk's default is black, which can't be seen on these backgrounds
         focuscolor=p["ACCENT"],
+        # clam draws a second line inside each border, light at the top left and
+        # dark at the bottom right (its #EEEBE7 / #CFCDC8 greys). Here both are the
+        # text colour: the light outline round buttons, fields, tabs and scrollbars.
+        lightcolor=p["FG"],
+        darkcolor=p["FG"],
     )
     # clam's own state colours are light greys (#EEEBE7 on hover, #DCDAD5 when
     # disabled); every style without a map of its own inherits these instead.
@@ -172,7 +177,13 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         foreground=[("disabled", p["MUTED"])],
         selectbackground=[("!focus", p["SELECT_BG"])],
         selectforeground=[("!focus", p["SELECT_FG"])],
+        lightcolor=[("disabled", p["MUTED"])],
+        darkcolor=[("disabled", p["MUTED"])],
     )
+    # the inner outline dims when pressed or disabled, and fields light it on focus
+    # (clam: #BAB5AB pressed, #6F9DC6 on a focused entry)
+    pressed_outline = [("disabled", p["MUTED"]), ("pressed", p["MUTED"])]
+    field_outline = [("disabled", p["MUTED"]), ("focus", p["ACCENT2"])]
     for name in ("TFrame", "TLabel", "TCheckbutton", "TRadiobutton"):
         style.configure(name, background=p["BG"], foreground=p["FG"])
 
@@ -201,11 +212,13 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
     style.configure("Muted.TLabel", foreground=p["MUTED"])
     for name, key in (("Good", "good"), ("Warn", "warn"), ("Bad", "bad")):
         style.configure(f"{name}.TLabel", foreground=ui_tokens.STATUS[key])
-    style.configure(
+    style.configure(  # both lines of the outline in the frame colour
         "TLabelframe",
         background=p["BG"],
         foreground=p["FG"],
         bordercolor=p["FRAME_BORDER"],
+        lightcolor=p["FRAME_BORDER"],
+        darkcolor=p["FRAME_BORDER"],
     )
     style.configure("TLabelframe.Label", background=p["BG"], foreground=p["ACCENT"])
     style.configure("TSeparator", background=p["BORDER"])
@@ -229,22 +242,29 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         ],
         foreground=[("active", p["ACCENT"]), ("disabled", p["MUTED"])],
         bordercolor=[("active", p["ACCENT2"]), ("focus", p["ACCENT"])],
+        lightcolor=pressed_outline,
+        darkcolor=pressed_outline,
     )
-    # The one main action in a panel: filled with the accent
+    # The one main action in a panel: filled with the accent, edge to edge
+    fill = [
+        ("disabled", p["BG2"]),
+        ("pressed", p["ACCENT2"]),
+        ("active", p["ACCENT2"]),
+    ]
     style.configure(
         "Accent.TButton",
         background=p["ACCENT"],
         foreground=p["BG"],
         bordercolor=p["ACCENT"],
+        lightcolor=p["ACCENT"],
+        darkcolor=p["ACCENT"],
         focuscolor=p["BG"],  # an accent ring would vanish on the accent fill
     )
     style.map(
         "Accent.TButton",
-        background=[
-            ("disabled", p["BG2"]),
-            ("pressed", p["ACCENT2"]),
-            ("active", p["ACCENT2"]),
-        ],
+        background=fill,
+        lightcolor=fill,
+        darkcolor=fill,
         foreground=[("disabled", p["MUTED"]), ("!disabled", p["BG"])],
         bordercolor=[("focus", p["FG"]), ("active", p["ACCENT2"])],
     )
@@ -263,6 +283,8 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         background=[("disabled", p["BG2"]), ("readonly", p["PANEL"])],
         bordercolor=[("focus", p["ACCENT2"])],
         foreground=[("disabled", p["MUTED"])],
+        lightcolor=field_outline,
+        darkcolor=field_outline,
     )
     for name in ("TCombobox", "TSpinbox"):
         style.configure(
@@ -285,6 +307,8 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
             background=[("disabled", p["BG2"]), ("readonly", p["PANEL"])],
             bordercolor=[("focus", p["ACCENT2"])],
             arrowcolor=[("disabled", p["MUTED"])],
+            lightcolor=field_outline,
+            darkcolor=field_outline,
         )
 
     # Notebooks
@@ -292,10 +316,12 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
     style.configure(
         "TNotebook.Tab", background=p["BG2"], foreground=p["FG"], padding=(10, 6)
     )
-    style.map(
+    style.map(  # clam maps the tabs' outline in every state, so this replaces it
         "TNotebook.Tab",
         background=[("selected", p["PANEL"]), ("active", p["PANEL2"])],
         foreground=[("selected", p["ACCENT"]), ("active", p["ACCENT2"])],
+        lightcolor=[("disabled", p["MUTED"]), ("", p["FG"])],
+        darkcolor=[("disabled", p["MUTED"]), ("", p["FG"])],
     )
     # A notebook with no tab strip (the chart pages draw their own tab row)
     style.configure("HiddenTabs.TNotebook", tabmargins=0)
@@ -384,6 +410,16 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         "Treeview.Heading",
         background=[("active", p["PANEL2"])],
         foreground=[("active", p["ACCENT2"])],
+    )
+
+    # Progress bars: an accent bar (it took the frame colour, unseen on its trough)
+    style.configure(
+        "Horizontal.TProgressbar",
+        background=p["ACCENT"],
+        troughcolor=p["BG2"],
+        bordercolor=p["BORDER"],
+        lightcolor=p["ACCENT"],
+        darkcolor=p["ACCENT"],
     )
 
     # Panes and scrollbars

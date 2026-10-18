@@ -343,6 +343,9 @@ STATE_STYLES = (
     "Treeview.Heading",
     "Vertical.TScrollbar",
     "Horizontal.TScrollbar",
+    "Horizontal.TProgressbar",
+    "TNotebook",
+    "TLabelframe",
 )
 STATES = (
     (),
@@ -366,14 +369,17 @@ COLOURS = (
     "selectbackground",
     "selectforeground",
     "troughcolor",
+    "lightcolor",  # clam's inner outline: light greys, darker when pressed,
+    "darkcolor",  # blue round a focused entry
 )
 
 
 @pytest.mark.parametrize("name", ["DARK", "PAPER"])
 def test_every_state_takes_its_colours_from_the_palette(tk_root, name):
     """clam's own state colours are light greys and a blue: a hovered or disabled
-    checkbox turned #EEEBE7 behind FG text (1.3:1), a disabled combo looked enabled
-    and focused combos had a #4A6984 border."""
+    checkbox turned #EEEBE7 behind FG text (1.3:1), a disabled combo looked enabled,
+    focused combos had a #4A6984 border, and the inner outline of buttons, fields,
+    tabs and scrollbars stayed clam's greys (#6F9DC6 round a focused entry)."""
     import ui_theme
     from tkinter import ttk
 
@@ -401,7 +407,7 @@ def test_text_is_readable_in_every_state(tk_root, name):
     ui_theme.apply_theme(tk_root, style, p)
     low = []
     for widget_style in STATE_STYLES:
-        if widget_style.endswith("Scrollbar"):
+        if widget_style.endswith(("Scrollbar", "Progressbar")):
             continue  # no text
         fields = widget_style in ("TEntry", "TCombobox", "TSpinbox", "Treeview")
         for state in STATES:
