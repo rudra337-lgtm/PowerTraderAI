@@ -52,8 +52,8 @@ class TradingModeIndicator(tk.Label):
             parent,
             font=ui_tokens.font("subtitle", "bold"),
             anchor="w",
-            padx=14,
-            pady=3,
+            padx=12,
+            pady=4,
         )
         self._settings = settings
         self._price_integrity: Optional[dict] = None
@@ -131,7 +131,7 @@ class TradingModeDialog(tk.Toplevel):
         self.testnet_var = tk.BooleanVar(value=current.testnet)
         self.confirm_var = tk.BooleanVar(value=False)
 
-        body = ttk.Frame(self, padding=14)
+        body = ttk.Frame(self, padding=12)
         body.pack(fill="both", expand=True)
 
         ttk.Radiobutton(
@@ -181,7 +181,7 @@ class TradingModeDialog(tk.Toplevel):
         )
 
         buttons = ttk.Frame(body)
-        buttons.grid(row=6, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        buttons.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12, 0))
         self.apply_btn = ttk.Button(buttons, text="Apply", command=self._apply)
         self.apply_btn.pack(side="right")
         ttk.Button(buttons, text="Cancel", command=self.destroy).pack(

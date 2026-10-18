@@ -9,6 +9,9 @@ from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Dict, List, Optional
 
+import ui_theme
+import ui_tokens
+
 try:
     from long_term_holdings import Holding, HoldingsManager, get_holdings_manager
 
@@ -25,21 +28,6 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
-
-# Dark theme colors
-DARK_BG = "#070B10"
-DARK_BG2 = "#0B1220"
-DARK_PANEL = "#0E1626"
-DARK_PANEL2 = "#121C2F"
-DARK_BORDER = "#243044"
-DARK_FG = "#C7D1DB"
-DARK_MUTED = "#8B949E"
-DARK_ACCENT = "#00FF66"
-DARK_ACCENT2 = "#00E5FF"
-DARK_SELECT_BG = "#17324A"
-DARK_SELECT_FG = "#00FF66"
-DARK_ERROR = "#FF4757"
-DARK_WARNING = "#FFA502"
 
 
 class HoldingsManagementGUI:
@@ -212,7 +200,9 @@ class HoldingsManagementGUI:
             )
             chart_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-            self.portfolio_fig = Figure(figsize=(8, 6), facecolor=DARK_BG)
+            self.portfolio_fig = Figure(
+                figsize=(8, 6), facecolor=ui_tokens.CHART["figure"]
+            )
             self.portfolio_canvas = FigureCanvasTkAgg(self.portfolio_fig, chart_frame)
             self.portfolio_canvas.get_tk_widget().pack(fill="both", expand=True)
         else:
@@ -287,7 +277,9 @@ class HoldingsManagementGUI:
             )
             perf_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-            self.analytics_fig = Figure(figsize=(10, 6), facecolor=DARK_BG)
+            self.analytics_fig = Figure(
+                figsize=(10, 6), facecolor=ui_tokens.CHART["figure"]
+            )
             self.analytics_canvas = FigureCanvasTkAgg(self.analytics_fig, perf_frame)
             self.analytics_canvas.get_tk_widget().pack(fill="both", expand=True)
 
@@ -344,8 +336,9 @@ class HoldingsManagementGUI:
                 self.holdings_tree.set(item_id, "holding_id", holding.id)
 
             # Configure tags for colors
-            self.holdings_tree.tag_configure("profit", foreground=DARK_ACCENT)
-            self.holdings_tree.tag_configure("loss", foreground=DARK_ERROR)
+            status = ui_tokens.STATUS
+            self.holdings_tree.tag_configure("profit", foreground=status["good"])
+            self.holdings_tree.tag_configure("loss", foreground=status["bad"])
 
             # Update portfolio summary
             self.update_portfolio_summary()
@@ -377,9 +370,9 @@ class HoldingsManagementGUI:
             )
 
             # Color code P&L
-            pnl_color = DARK_ACCENT if summary["total_pnl"] >= 0 else DARK_ERROR
-            self.summary_labels["total_pnl"].config(foreground=pnl_color)
-            self.summary_labels["total_pnl_pct"].config(foreground=pnl_color)
+            pnl_style = "Good.TLabel" if summary["total_pnl"] >= 0 else "Bad.TLabel"
+            self.summary_labels["total_pnl"].config(style=pnl_style)
+            self.summary_labels["total_pnl_pct"].config(style=pnl_style)
 
             # Update portfolio chart
             if MATPLOTLIB_AVAILABLE and hasattr(self, "portfolio_canvas"):
@@ -394,6 +387,7 @@ class HoldingsManagementGUI:
             return
 
         try:
+            chart = ui_tokens.CHART
             self.portfolio_fig.clear()
             ax = self.portfolio_fig.add_subplot(111)
 
@@ -405,8 +399,9 @@ class HoldingsManagementGUI:
                     "No holdings to display",
                     ha="center",
                     va="center",
-                    color=DARK_FG,
+                    color=chart["text"],
                 )
+                ui_theme.theme_figure(self.portfolio_fig)
                 self.portfolio_canvas.draw()
                 return
 
@@ -427,14 +422,13 @@ class HoldingsManagementGUI:
                     labels=symbols,
                     autopct="%1.1f%%",
                     colors=colors,
-                    textprops={"color": DARK_FG},
+                    textprops={"color": chart["text"]},
                 )
-                ax.set_title("Portfolio Allocation", color=DARK_FG, fontsize=14)
+                for autotext in autotexts:  # dark on the pale wedges
+                    autotext.set_color(chart["figure"])
+                ax.set_title("Portfolio Allocation", color=chart["text"], fontsize=14)
 
-                # Style the chart
-                self.portfolio_fig.patch.set_facecolor(DARK_BG)
-                ax.set_facecolor(DARK_BG)
-
+            ui_theme.theme_figure(self.portfolio_fig)
             self.portfolio_canvas.draw()
 
         except Exception as e:
@@ -541,8 +535,9 @@ class HoldingsManagementGUI:
                 self.suggestions_tree.insert("", "end", values=values, tags=tags)
 
             # Configure tag colors
-            self.suggestions_tree.tag_configure("buy", foreground=DARK_ACCENT)
-            self.suggestions_tree.tag_configure("sell", foreground=DARK_WARNING)
+            status = ui_tokens.STATUS
+            self.suggestions_tree.tag_configure("buy", foreground=status["good"])
+            self.suggestions_tree.tag_configure("sell", foreground=status["warn"])
 
         except Exception as e:
             print(f"Error generating suggestions: {e}")
@@ -746,7 +741,9 @@ class PriceUpdateDialog:
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         ttk.Label(
-            main_frame, text="Update Current Prices", font=("Arial", 12, "bold")
+            main_frame,
+            text="Update Current Prices",
+            font=ui_tokens.font("title", "bold"),
         ).pack(pady=10)
 
         # Price entries frame
@@ -810,18 +807,20 @@ if not HOLDINGS_AVAILABLE:
             frame.pack(fill="both", expand=True, padx=20, pady=20)
 
             ttk.Label(
-                frame, text="Long-term Holdings Management", font=("Arial", 16, "bold")
+                frame,
+                text="Long-term Holdings Management",
+                font=ui_tokens.font("display", "bold"),
             ).pack(pady=20)
 
             ttk.Label(
                 frame,
                 text="⚠️ Holdings system not available",
-                foreground=DARK_WARNING,
-                font=("Arial", 12),
+                style="Warn.TLabel",
+                font=ui_tokens.font("title"),
             ).pack(pady=10)
 
             ttk.Label(
-                frame, text="Missing dependencies:", font=("Arial", 10, "bold")
+                frame, text="Missing dependencies:", font=ui_tokens.font("body", "bold")
             ).pack(pady=5)
 
             missing_deps = []
@@ -832,15 +831,15 @@ if not HOLDINGS_AVAILABLE:
 
             if missing_deps:
                 for dep in missing_deps:
-                    ttk.Label(frame, text=f"• {dep}", foreground=DARK_ERROR).pack()
+                    ttk.Label(frame, text=f"• {dep}", style="Bad.TLabel").pack()
             else:
                 ttk.Label(
-                    frame, text="• long_term_holdings module", foreground=DARK_ERROR
+                    frame, text="• long_term_holdings module", style="Bad.TLabel"
                 ).pack()
 
             ttk.Label(
                 frame,
                 text="Install missing dependencies to enable holdings management",
-                foreground=DARK_MUTED,
-                font=("Arial", 10),
+                style="Muted.TLabel",
+                font=ui_tokens.font("body"),
             ).pack(pady=10)

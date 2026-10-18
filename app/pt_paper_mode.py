@@ -176,7 +176,7 @@ class PaperBanner(tk.Frame):
             bg=palette["ACCENT"],
             fg=palette["BG"],
             font=ui_tokens.font("display", "bold"),
-            padx=14,
+            padx=12,
             pady=4,
         )
         label.pack(side="left")

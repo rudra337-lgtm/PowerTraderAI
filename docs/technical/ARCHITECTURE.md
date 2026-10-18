@@ -23,9 +23,8 @@ PowerTrader AI+ Modular Architecture
 │   ├── Process Manager (pt_process_manager.py) - Subprocess Monitoring
 │   └── Settings Manager (pt_settings_manager.py) - Validated Configuration
 ├── UI/UX Systems
-│   ├── Theme Manager (pt_theme_manager.py) - Centralized Styling
-│   ├── GUI Components (pt_hub_gui_components.py) - Reusable Widgets
-│   └── Chart Components (pt_hub_chart_components.py) - Visualization
+│   ├── Design Tokens (ui_tokens.py) - Colours, Type Scale, Spacing Scale
+│   └── Theme (ui_theme.py) - The One ttk Theme, Built From a Palette
 └── Individual Trainers (*/neural_trainer.py) - Coin-Specific Training
 ```
 
@@ -193,15 +192,21 @@ stop; each cycle prints and logs the effective stop, its owning overlay and each
 trail-line column shows the stop and its owner with the active overlay ids in the heading.
 ### UI/UX Enhancement
 
-#### Theme Management (`pt_theme_manager.py`)
-- **Centralized Theming**: Single source for all UI colors and styles
-- **Widget Factories**: Themed widget creation methods
-- **Runtime Updates**: Dynamic theme modifications
-- **Consistent Styling**: Unified appearance across all components
-
-#### Component Modularization
-- **GUI Components** (`pt_hub_gui_components.py`): Extracted reusable widgets
-- **Chart Components** (`pt_hub_chart_components.py`): Specialized visualization components
+#### Design tokens and theme (`ui_tokens.py`, `ui_theme.py`)
+- **Tokens** (`ui_tokens.py`): every colour and size, defined once. The dark and paper
+  palettes, status colours, chart surfaces and lines, the type scale and the spacing
+  scale. Pure data, no Tk.
+- **Theme** (`ui_theme.py`): `apply_theme()` builds every ttk style from one palette,
+  including hover, pressed, disabled and focus states; `install_classic_defaults()`
+  colours classic Tk widgets; `theme_figure()` gives matplotlib figures the chart
+  surfaces. The module docstring lists the named styles (`Accent.TButton`,
+  `Title.TLabel`, `Good.TLabel` ...).
+- **One owner**: ttk styles are shared by every window in the process, so only
+  `ui_theme` configures them. Feature tabs and dialogs use its styles and read other
+  colours from `ui_theme.active_palette()` or `ui_tokens`.
+- **Tests**: `app/tests/test_design_tokens.py` checks contrast (WCAG 2.1), that every
+  style and state takes its colours from the palette, and that UI modules repeat no
+  colour, font or off-scale spacing literal.
 
 ## Technical Specifications
 

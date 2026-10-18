@@ -70,6 +70,8 @@ CHART: Dict[str, str] = {
     "text": DARK["FG"],
     "grid": DARK["BORDER"],
     "label_bg": DARK["BG2"],  # price tags, pattern labels, hover notes
+    "series": DARK["ACCENT"],  # the feature tabs' data series: prices, returns
+    "series2": DARK["ACCENT2"],  # a second series, e.g. volume
 }
 
 # Level lines and the price tags beside them.
@@ -129,6 +131,7 @@ def mono(role: str) -> Tuple:
 # --- spacing scale (pixels) ---------------------------------------------------------
 
 SPACE: Dict[str, int] = {
+    "px": 1,  # a one-pixel nudge in the dense Controls / Health pane
     "hair": 2,
     "xs": 4,
     "edge": 5,  # the chart panel's outer margin (owner, 2026-10-14)

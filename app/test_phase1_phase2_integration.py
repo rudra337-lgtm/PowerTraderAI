@@ -28,10 +28,11 @@ def test_imports():
 
         print("✓ Caching system imported successfully")
 
-        # Test theme manager
-        from pt_theme_manager import setup_dark_theme, ThemeManager, get_default_colors
+        # Test the design tokens and the theme built from them
+        import ui_theme
+        import ui_tokens
 
-        print("✓ Theme manager imported successfully")
+        print("✓ Design tokens and theme imported successfully")
 
         # Test async patterns
         from pt_async_patterns import AsyncHTTPClient, AsyncFileManager, AsyncTaskQueue

@@ -294,6 +294,8 @@ LINES = ui_tokens.CHART_LINES
 MARKERS = ui_tokens.TRADE_MARKERS
 CHART_FONT_PT = ui_tokens.CHART_FONT_PT
 SPACE = ui_tokens.SPACE  # spacing scale, in pixels
+# Not a gap: how far down the chart status text sits to centre it on the tab buttons
+STATUS_TEXT_DROP = 9
 
 # Live-output colouring: the first rule that matches a line picks its tag.
 _LOG_LINE_RULES = (
@@ -2731,7 +2733,7 @@ class PowerTraderHub(tk.Tk):
         # Account: a status row (trader, exchange, start/stop), then the figures
         # as a two-column key/value grid.
         acct_box = ttk.LabelFrame(main_container, text="Account")
-        acct_box.grid(row=0, column=0, sticky="ew", pady=(0, 3))
+        acct_box.grid(row=0, column=0, sticky="ew", pady=(0, 2))
         acct_box.grid_columnconfigure(1, weight=1)
         acct_box.grid_columnconfigure(3, weight=1)
 
@@ -2767,7 +2769,7 @@ class PowerTraderHub(tk.Tk):
             font=ui_tokens.font("caption"),
             foreground=DARK_ACCENT2,
         )
-        self.lbl_trader.pack(side="left", padx=(3, 12))
+        self.lbl_trader.pack(side="left", padx=(2, 12))
 
         # Exchange status (click for details)
         self.lbl_exchange = ttk.Label(
@@ -2802,7 +2804,7 @@ class PowerTraderHub(tk.Tk):
         # Coins: one cell per coin (training status, trained-for, long/short
         # signal counts), with the Training and Thinking controls in its header.
         training_section = ttk.LabelFrame(main_container, text="Coins")
-        training_section.grid(row=1, column=0, sticky="ew", pady=(3, 0))
+        training_section.grid(row=1, column=0, sticky="ew", pady=(2, 0))
 
         training_title_row = ttk.Frame(training_section)
         training_title_row.pack(fill="x", padx=6, pady=(1, 0))
@@ -2821,7 +2823,7 @@ class PowerTraderHub(tk.Tk):
             font=ui_tokens.font("caption"),
             foreground=DARK_ACCENT2,
         )
-        self.training_status_label.pack(side="left", padx=(3, 4))
+        self.training_status_label.pack(side="left", padx=(2, 4))
         # Note: TTK buttons don't support 'height' parameter, so we only use 'width'
         train_all_btn = ttk.Button(
             training_title_row,
@@ -2863,7 +2865,7 @@ class PowerTraderHub(tk.Tk):
             font=ui_tokens.font("caption"),
             foreground=DARK_ACCENT2,
         )
-        self.lbl_neural.pack(side="right", padx=(3, 4))
+        self.lbl_neural.pack(side="right", padx=(2, 4))
         ttk.Label(
             training_title_row,
             text="Thinking:",
@@ -2876,7 +2878,7 @@ class PowerTraderHub(tk.Tk):
 
         # One cell per coin, built once per coin list and updated in place
         self.training_status_frame = ttk.Frame(training_section)
-        self.training_status_frame.pack(fill="x", padx=4, pady=(1, 3))
+        self.training_status_frame.pack(fill="x", padx=4, pady=(1, 2))
         self._training_cells: Dict[str, Tuple[Any, ...]] = {}
         # signal counts' mtime cache: path -> (mtime, value)
         self._neural_overview_cache: Dict[str, Tuple[float, Any]] = {}
@@ -5720,7 +5722,7 @@ Platform: {sys.platform}
                 **tight,
             )
             dot.pack(side="left")
-            sym.pack(side="left", padx=(3, 2))
+            sym.pack(side="left", padx=2)
             age.pack(side="left")
             sig.pack(side="left")
             handler = self._make_coin_click_handler(coin)
@@ -7165,8 +7167,11 @@ Platform: {sys.platform}
         self.chart_tabs_bar = ScrollingRow(row)
         self.chart_tabs_bar.pack(side="left", anchor="n")
         self._chart_status_slot = ttk.Frame(row)
-        self._chart_status_slot.pack(  # 9 px down centres the text on the buttons
-            side="left", anchor="n", padx=(SPACE["sm"], 0), pady=(9, SPACE["xs"])
+        self._chart_status_slot.pack(
+            side="left",
+            anchor="n",
+            padx=(SPACE["sm"], 0),
+            pady=(STATUS_TEXT_DROP, SPACE["xs"]),
         )
         for widget in (row, self._chart_status_slot, self.chart_tabs_bar.inner):
             widget.bind("<Configure>", self._fit_chart_tab_row, add="+")
@@ -7903,10 +7908,10 @@ Platform: {sys.platform}
         r += 1
         for label, folder in self._user_folder_rows():
             ttk.Label(frm, text=label).grid(
-                row=r, column=0, sticky="w", padx=(0, 10), pady=3
+                row=r, column=0, sticky="w", padx=(0, 10), pady=4
             )
             path_row = ttk.Frame(frm)
-            path_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
+            path_row.grid(row=r, column=1, columnspan=2, sticky="ew", pady=4)
             path_row.columnconfigure(0, weight=1)
             path_entry = ttk.Entry(path_row)
             path_entry.insert(0, folder)
@@ -8016,7 +8021,7 @@ Platform: {sys.platform}
         r += 1
 
         btns = ttk.Frame(frm)
-        btns.grid(row=r, column=0, columnspan=3, sticky="ew", pady=14)
+        btns.grid(row=r, column=0, columnspan=3, sticky="ew", pady=12)
         btns.columnconfigure(0, weight=1)
 
         def save():

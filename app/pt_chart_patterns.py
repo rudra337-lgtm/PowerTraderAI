@@ -862,7 +862,7 @@ class ChartSettingsWindow(tk.Toplevel):
         lo, hi = cs.MAX_LABELS_RANGE
         ttk.Spinbox(
             opts, from_=lo, to=hi, width=4, textvariable=self.max_labels_var
-        ).pack(side="left", padx=(4, 16))
+        ).pack(side="left", padx=(4, 12))
         ttk.Checkbutton(
             opts, text="Show what happened next", variable=self.next_arrows_var
         ).pack(side="left")
