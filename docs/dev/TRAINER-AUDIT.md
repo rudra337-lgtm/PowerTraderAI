@@ -381,7 +381,7 @@ check, so Phase 1 must confirm the upstream commit hash before recording it.
      `:1410`). By static trace the thinker's candle loop needs two candles and retries for ever for a trained coin,
      calling the exchange price API about every 0.2 s plus the request time;
    - not launched: the per-coin `app/<SYM>/pt_trainer*.py` copies, `app/pt_trainer_standalone.py`,
-     `app/pt_neural_processor.py` (demos only), `app/pt_hub_chart_components.py` (imported nowhere),
+     `app/pt_neural_processor.py` (demos only), `app/pt_hub_chart_components.py` (imported nowhere; removed since, in PR #167),
      `app/demo_phase3_features.py`, `app/phase3_live_demo.py`.
 
    Phase 1 takes its data from `app/market_data/candles.py`, as the spec says.

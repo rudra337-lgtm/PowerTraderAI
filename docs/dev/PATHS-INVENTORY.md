@@ -86,8 +86,8 @@ that the app has been run from both working directories.
 | `<hub>/<paper\|testnet\|"">/` | pt_trader.py:337-338 | mkdir | per-mode books | I | yes |
 | `<hub>/<sub>/trader_status.json` (+ `.tmp`) | pt_trader.py:339, 446-451, 822-823, 2423; pt_hub.py:1998, 6479-6506; pt_api_server.py:116-119 (at **hub root**, not `<sub>`) | W (trader), R (hub, API) | account, positions, price integrity | I | yes |
 | `<hub>/<sub>/trade_history.jsonl` | pt_trader.py:340, 455-458, 497-505, 820, 955-966, 1096-1107; pt_hub.py:641, 1396, 1643, 1776, 6622, 6811-6827, 3320, 3340, 7266, 7286; pt_api_server.py:141-154 | RW | fills | I | yes |
-| `<hub>/<sub>/pnl_ledger.json` (+ `.tmp`) | pt_trader.py:341, 461-489; pt_hub.py:2000, 6793-6801; pt_api_server.py:210-219; pt_hub_chart_components.py:502-504 | RW | realised PnL, open positions | I | yes |
-| `<hub>/<sub>/account_value_history.jsonl` | pt_trader.py:342-344, 2419-2422; pt_hub.py:1637-1663, 3319, 7265; pt_api_server.py:175-180; pt_hub_chart_components.py:496-514 | RW | equity curve | I | yes |
+| `<hub>/<sub>/pnl_ledger.json` (+ `.tmp`) | pt_trader.py:341, 461-489; pt_hub.py:2000, 6793-6801; pt_api_server.py:210-219; pt_hub_chart_components.py:502-504 (module removed in PR #167; it was imported nowhere) | RW | realised PnL, open positions | I | yes |
+| `<hub>/<sub>/account_value_history.jsonl` | pt_trader.py:342-344, 2419-2422; pt_hub.py:1637-1663, 3319, 7265; pt_api_server.py:175-180; pt_hub_chart_components.py:496-514 (module removed in PR #167; it was imported nowhere) | RW | equity curve | I | yes |
 | `<hub>/<sub>/strategy_state.json` (+ `.tmp`) | pt_trader.py:346; signal_engine.py:154-164 (R), 182-197 (W) | RW | strategy positions, overlay state | I | yes |
 | `<hub>/<sub>/paper_account.json` (+ `.tmp`) | pt_trader.py:349-352; trading_mode.py:430-447, 629-656 | RW | paper book | I | yes |
 | `<hub>/runner_ready.json` (+ `.tmp`) | pt_thinker.py:442-465, 575-577, 666-669; pt_hub.py:2006, 5096-5099, 5151-5153, 6144-6147 | RW | thinker readiness gate | I | yes |
