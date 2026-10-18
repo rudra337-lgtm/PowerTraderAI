@@ -553,6 +553,48 @@ def test_theme_figure_gives_charts_the_chart_surfaces():
     assert to_hex(ax.get_legend().get_texts()[0].get_color()) == c["text"].lower()
 
 
+# --- the hub --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def hub(monkeypatch):
+    import helpers_trainer as ht
+
+    hub = ht.build_real_hub(monkeypatch)  # skips when Tk cannot start
+    yield hub
+    ht.close_hub(hub)
+
+
+def _classic_widgets(parent):
+    for child in parent.winfo_children():
+        if not child.winfo_class().startswith("T"):  # ttk classes are TLabel, ...
+            yield child
+        yield from _classic_widgets(child)
+
+
+def test_classic_widgets_in_the_hub_have_readable_text_and_selections(hub):
+    """Selected Trade History rows were light grey on cyan (DARK_FG on ACCENT2,
+    1.0:1)."""
+    low = []
+    for widget in _classic_widgets(hub):
+        if widget.winfo_class() not in CLASSIC_TEXT_WIDGETS:
+            continue  # canvases and frames show no text
+        keys = widget.keys()
+        for fg, bg in (
+            ("foreground", "background"),
+            ("selectforeground", "selectbackground"),
+        ):
+            if fg in keys and bg in keys:
+                # Tk resolves names such as SystemHighlightText
+                a, b = (
+                    "#%02X%02X%02X" % tuple(v // 257 for v in widget.winfo_rgb(c))
+                    for c in (widget.cget(fg), widget.cget(bg))
+                )
+                if contrast(a, b) < 4.5:
+                    low.append((widget.winfo_class(), str(widget), fg, a, b))
+    assert not low
+
+
 # --- the exchange window --------------------------------------------------------------
 
 

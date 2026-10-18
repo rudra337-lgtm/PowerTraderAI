@@ -3433,8 +3433,8 @@ class PowerTraderHub(tk.Tk):
             height=10,
             bg=DARK_PANEL,
             fg=DARK_FG,
-            selectbackground=DARK_ACCENT2,
-            selectforeground=DARK_FG,
+            selectbackground=DARK_SELECT_BG,
+            selectforeground=DARK_SELECT_FG,
             font=ui_tokens.mono("small"),
         )
 
