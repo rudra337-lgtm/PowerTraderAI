@@ -45,7 +45,6 @@ from pt_paper_mode import (
     PaperBanner,
     attach_trading_section_label,
     fetch_binance_btc_price,
-    get_palette,
     run_sample_scenario,
 )
 import trainer_guard
@@ -2334,7 +2333,7 @@ class PowerTraderHub(tk.Tk):
     def _apply_forced_dark_mode(self) -> None:
         """Apply the hub's one ttk theme from the active palette: dark, or blue in
         paper mode. ui_theme builds every style from ui_tokens."""
-        palette = get_palette(bool(getattr(self, "_paper_mode", False)))
+        palette = ui_tokens.palette(bool(getattr(self, "_paper_mode", False)))
         try:
             ui_theme.apply_theme(self, ttk.Style(self), palette)
         except tk.TclError:
@@ -2346,7 +2345,7 @@ class PowerTraderHub(tk.Tk):
         """Pack the PAPER TRADING banner across the top of the window."""
         if self._paper_banner is not None:
             return
-        palette = get_palette(True)
+        palette = ui_tokens.palette(True)
         self._paper_banner = PaperBanner(
             self,
             palette=palette,
@@ -2370,7 +2369,7 @@ class PowerTraderHub(tk.Tk):
         frame = getattr(self, "trades_frame", None)
         if frame is None or self._paper_section_label is not None:
             return
-        label = attach_trading_section_label(frame, get_palette(True))
+        label = attach_trading_section_label(frame, ui_tokens.palette(True))
         pack_at_top(label, frame)
         self._paper_section_label = label
 
@@ -7435,7 +7434,7 @@ Platform: {sys.platform}
                 hub_dir=self.hub_dir,
                 trader_running=self._paper_trader_running_reason,
                 known_coins=getattr(self, "coins", ()) or (),
-                palette=get_palette(paper_mode),
+                palette=ui_tokens.palette(paper_mode),
                 live=not paper_mode,
                 on_saved=self._refresh_trader_status,
             )

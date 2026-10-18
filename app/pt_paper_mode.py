@@ -2,8 +2,9 @@
 Paper trading mode helpers for the PowerTrader hub.
 
 Provides:
-- Palette that paints the hub blue (instead of black) when paper mode is on,
-  so the user can instantly see they are not trading real money.
+- (The blue palette that paints the hub when paper mode is on, so the user can
+  instantly see they are not trading real money, is ui_tokens.PAPER; the hub
+  picks it with ui_tokens.palette(paper_mode) and ui_theme applies it.)
 - "PAPER TRADING" banner label that gets injected into the trading section.
 - A sample-trade runner that pulls a live BTC price from Binance's public
   ticker endpoint and routes a simulated BUY then SELL through
@@ -25,27 +26,15 @@ import tkinter as tk
 import urllib.error
 import urllib.request
 from decimal import Decimal
-from tkinter import ttk
 from typing import Any, Callable, Dict, Optional
 
-import ui_theme
 import ui_tokens
 from pt_paper_trading import OrderSide, OrderType, PaperTradingAccount
 from trading_mode import read_trading_settings
 
-# --- Palettes -----------------------------------------------------------------
 # Owner spec (PR #90 comment): "paper mode changes the CSS of the background.
-# Say BLUE instead of BLACK." Tk has no CSS, so we mirror the dark palette key
-# names and let the hub apply whichever one matches the current mode.
-
-# Both palettes live in ui_tokens (one definition for the whole hub).
-DARK_PALETTE: Dict[str, str] = ui_tokens.DARK
-PAPER_PALETTE: Dict[str, str] = ui_tokens.PAPER
-
-
-def get_palette(paper_mode: bool) -> Dict[str, str]:
-    return PAPER_PALETTE if paper_mode else DARK_PALETTE
-
+# Say BLUE instead of BLACK." Tk has no CSS: ui_tokens.PAPER mirrors the dark
+# palette's keys in blue, and the hub applies the one that matches the mode.
 
 # --- Settings persistence -----------------------------------------------------
 # The mode itself lives in `trading.mode` (see trading_mode.py) - the single
@@ -241,20 +230,6 @@ def attach_trading_section_label(parent: tk.Misc, palette: Dict[str, str]) -> tk
         font=ui_tokens.font("title", "bold"),
         pady=2,
     )
-
-
-# --- Style application -------------------------------------------------------
-def apply_palette_to_style(
-    root: tk.Misc, style: ttk.Style, palette: Dict[str, str]
-) -> None:
-    """Style every hub widget from ``palette``: the same full theme the hub builds
-    (ui_theme.apply_theme), so paper mode covers every style, not a subset."""
-    ui_theme.apply_theme(root, style, palette)
-
-
-def install_classic_widget_defaults(root: tk.Misc, palette: Dict[str, str]) -> None:
-    """Colours that classic Tk widgets (Text, Listbox, Menu) read when created."""
-    ui_theme.install_classic_defaults(root, palette)
 
 
 # --- Read settings without instantiating the hub ----------------------------

@@ -160,6 +160,16 @@ def test_ui_modules_repeat_no_colour_or_font_literal(module):
     assert 'DARK_BG = "' not in source  # no copied palette
 
 
+@pytest.mark.parametrize("module", [m for m in UI_MODULES if m != "ui_theme.py"])
+def test_no_ui_module_keeps_a_second_name_for_a_palette(module):
+    """pt_paper_mode re-exported DARK_PALETTE, PAPER_PALETTE and get_palette
+    alongside ui_tokens: two names to keep in step for every palette. (ui_theme
+    keeps the active palette, its own state.)"""
+    source = _source(module)
+    assert not re.findall(r"(?m)^\w+\s*(?::[^=\n]+)?=\s*ui_tokens\.(?:DARK|PAPER)\b", source)
+    assert "def get_palette" not in source
+
+
 @pytest.mark.parametrize("module", UI_MODULES)
 def test_only_ui_theme_configures_ttk_styles(module):
     """ttk styles are shared by every window in the process: the exchange window
@@ -246,11 +256,11 @@ def test_one_palette_styles_every_widget(tk_root, name):
     scrollbars and the chart tabs dark on blue frames."""
     from tkinter import ttk
 
-    import pt_paper_mode
+    import ui_theme
 
     p = getattr(ui_tokens, name)
     style = ttk.Style(tk_root)
-    pt_paper_mode.apply_palette_to_style(tk_root, style, p)  # paper mode's entry
+    ui_theme.apply_theme(tk_root, style, p)  # the one entry, for either mode
     for widget_style, option, key in EVERY_STYLE:
         assert str(style.lookup(widget_style, option)).upper() == p[key].upper(), (
             widget_style,
