@@ -18,6 +18,7 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 import ui_tokens  # noqa: E402
+from helpers_colour import contrast  # noqa: E402
 
 HUB_MODULES = (  # the main window and its dialogs
     "pt_hub.py",
@@ -47,22 +48,14 @@ def _source(module):
         return f.read()
 
 
-def _luminance(colour):
-    from matplotlib.colors import to_rgb
-
-    def channel(v):
-        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
-
-    r, g, b = to_rgb(colour)
-    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-
-
-def contrast(a, b):
-    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
-    return (hi + 0.05) / (lo + 0.05)
-
-
 # --- tokens ---------------------------------------------------------------------------
+
+
+def test_the_contrast_helper_spans_1_to_21_for_strings_and_tuples():
+    assert contrast("#000", "#FFFFFF") == pytest.approx(21.0)
+    assert contrast((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)) == pytest.approx(21.0)
+    assert contrast("#777777", (119 / 255,) * 3) == pytest.approx(1.0)
+    assert contrast("#767676", "#FFFFFF") == pytest.approx(4.54, abs=0.01)
 
 
 def test_both_palettes_define_the_same_tokens():
