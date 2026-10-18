@@ -539,7 +539,9 @@ def test_the_status_line_sits_in_the_tab_row_after_the_buttons(hub):
     hub._show_chart_page(coin)
     strip = hub._chart_tabs_strip
     assert row.pack_slaves() == [hub.chart_settings_button, hub._chart_tf_box, strip]
-    assert strip.grid_slaves(column=0) == [bar] and strip.grid_slaves(column=1) == [slot]
+    assert strip.grid_slaves(column=0) == [bar] and strip.grid_slaves(column=1) == [
+        slot
+    ]
     chart = hub.charts[coin]
     assert chart.status_frame.master is slot and chart.neural_status_label.master is (
         chart.status_frame

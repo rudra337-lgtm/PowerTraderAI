@@ -3190,7 +3190,9 @@ class PowerTraderHub(tk.Tk):
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP))
+        self.chart_tabs_bar.add(
+            acct_btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP)
+        )
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -3212,7 +3214,9 @@ class PowerTraderHub(tk.Tk):
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP))
+            self.chart_tabs_bar.add(
+                btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP)
+            )
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
@@ -7344,7 +7348,9 @@ Platform: {sys.platform}
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP))
+        self.chart_tabs_bar.add(
+            acct_btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP)
+        )
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -7366,7 +7372,9 @@ Platform: {sys.platform}
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP))
+            self.chart_tabs_bar.add(
+                btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP)
+            )
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(

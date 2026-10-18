@@ -159,7 +159,9 @@ def test_no_ui_module_keeps_a_second_name_for_a_palette(module):
     alongside ui_tokens: two names to keep in step for every palette. (ui_theme
     keeps the active palette, its own state.)"""
     source = _source(module)
-    assert not re.findall(r"(?m)^\w+\s*(?::[^=\n]+)?=\s*ui_tokens\.(?:DARK|PAPER)\b", source)
+    assert not re.findall(
+        r"(?m)^\w+\s*(?::[^=\n]+)?=\s*ui_tokens\.(?:DARK|PAPER)\b", source
+    )
     assert "def get_palette" not in source
 
 
@@ -325,7 +327,9 @@ def test_fonts_use_the_system_family_and_tooltips_the_theme(tk_root):
     p = ui_tokens.PAPER
     ui_theme.apply_theme(tk_root, ttk.Style(tk_root), p)
     family = tkfont.nametofont("TkDefaultFont", root=tk_root).actual("family")
-    caption = tkfont.Font(root=tk_root, name=ui_tokens.font("caption", "bold"), exists=True)
+    caption = tkfont.Font(
+        root=tk_root, name=ui_tokens.font("caption", "bold"), exists=True
+    )
     # not Arial, Tk's fallback for a tuple naming "TkDefaultFont" as its family
     assert caption.actual("family") == family
     assert caption.actual("weight") == "bold"
