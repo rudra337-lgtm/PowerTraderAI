@@ -248,19 +248,23 @@ class SigLabel:
 @pytest.mark.parametrize(
     "longs, shorts, age, level, text, colour",
     [
-        (None, None, None, 3, "–", pt_hub.DARK_MUTED),  # no signal file
+        (None, None, None, 3, "–", "MUTED"),  # no signal file
         (4, 0, 10, 3, "L4 S0", pt_hub.STATUS_GREEN),
         (3, 0, 10, 3, "L3 S0", pt_hub.STATUS_GREEN),  # the trader starts at 3
-        (2, 0, 10, 3, "L2 S0", pt_hub.DARK_FG),  # below the start level: no trade
+        (2, 0, 10, 3, "L2 S0", "FG"),  # below the start level: no trade
         (1, 0, 10, 1, "L1 S0", pt_hub.STATUS_GREEN),
         (4, 2, 10, 3, "L4 S2", pt_hub.LOG_SHORT),
-        (0, 0, 10, 3, "L0 S0", pt_hub.DARK_FG),
-        (4, 0, 16 * 60, 3, "L4 S0", pt_hub.DARK_MUTED),  # the trader ignores it now
+        (0, 0, 10, 3, "L0 S0", "FG"),
+        (4, 0, 16 * 60, 3, "L4 S0", "MUTED"),  # the trader ignores it now
     ],
 )
 def test_a_cell_shows_the_signal_counts(longs, shorts, age, level, text, colour):
+    """A palette key (FG, MUTED) is the active palette's colour: dark or paper."""
     import time
 
+    import ui_theme
+
+    colour = ui_theme.active_palette().get(colour, colour)
     hub = types.SimpleNamespace(_training_signal_state={})
     label = SigLabel()
     mtime = None if age is None else time.time() - age

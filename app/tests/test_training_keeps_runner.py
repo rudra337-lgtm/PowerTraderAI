@@ -145,10 +145,13 @@ def test_stopping_the_trader_says_why():
 
 
 def test_a_trained_coin_is_shown_as_trained():
+    import ui_theme
+
     hub = types.SimpleNamespace(_is_recently_trained=lambda coin, hours_threshold: True)
     assert Hub._get_status_border_color(hub, "✅", "BTC") == pt_hub.STATUS_GREEN
     assert Hub._get_status_border_color(hub, "●", "BTC") == pt_hub.STATUS_AMBER
-    assert Hub._get_status_border_color(hub, "❌", "BTC") == pt_hub.STATUS_IDLE
+    idle = ui_theme.active_palette()["MUTED"]  # the dark or the paper grey
+    assert Hub._get_status_border_color(hub, "❌", "BTC") == idle
 
 
 def click_hub(trained, running=False, allowed=True):

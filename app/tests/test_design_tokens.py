@@ -624,8 +624,10 @@ def hub(monkeypatch):
 
 
 def _classic_widgets(parent):
+    from tkinter import ttk
+
     for child in parent.winfo_children():
-        if not child.winfo_class().startswith("T"):  # ttk classes are TLabel, ...
+        if not isinstance(child, ttk.Widget):
             yield child
         yield from _classic_widgets(child)
 
@@ -651,6 +653,47 @@ def test_classic_widgets_in_the_hub_have_readable_text_and_selections(hub):
                 if contrast(a, b) < 4.5:
                     low.append((widget.winfo_class(), str(widget), fg, a, b))
     assert not low
+
+
+def test_the_hubs_classic_widgets_take_the_active_palette(hub):
+    """pt_hub passed fixed DARK_* colours to its classic widgets, so in paper mode
+    the Settings and Chart settings windows, the live logs, the menus and Trade
+    History stayed dark navy inside the blue frames."""
+    import tkinter as tk
+
+    import ui_theme
+
+    p = ui_tokens.PAPER
+    assert hub._paper_mode and ui_theme.active_palette() is p  # tests run in paper
+
+    def colour(widget, option):
+        return str(widget.cget(option)).upper()
+
+    menubar = hub.nametowidget(hub["menu"])
+    assert colour(menubar, "background") == p["BG2"].upper()
+    for text in (hub.trainer_text, hub.runner_text, hub.trader_text, hub.hist_list):
+        assert colour(text, "background") == p["PANEL"].upper()
+        assert colour(text, "selectbackground") == p["SELECT_BG"].upper()
+        assert colour(text, "selectforeground") == p["SELECT_FG"].upper()
+    hub.open_settings_dialog()
+    settings = [
+        w
+        for w in hub.winfo_children()
+        if isinstance(w, tk.Toplevel) and w.title() == "Settings"
+    ][-1]
+    assert colour(settings, "background") == p["BG"].upper()
+    canvases = [w for w in _classic_widgets(settings) if w.winfo_class() == "Canvas"]
+    assert canvases
+    assert all(colour(c, "background") == p["BG"].upper() for c in canvases)
+    assert colour(hub.open_chart_settings(), "background") == p["BG"].upper()
+
+
+def test_the_hub_names_no_fixed_palette():
+    """The palette is chosen at start-up (dark, or paper blue); a colour taken from
+    ui_tokens.DARK directly stays dark in paper mode."""
+    source = _source("pt_hub.py")
+    assert not re.findall(r"\bDARK_[A-Z]", source)
+    assert "ui_tokens.DARK" not in source
 
 
 # --- the exchange window --------------------------------------------------------------

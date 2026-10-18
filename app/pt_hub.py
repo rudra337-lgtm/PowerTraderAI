@@ -268,21 +268,11 @@ class ToolTip:
             self.tooltip_window = None
 
 
-# The dark palette (ui_tokens holds every colour; ui_theme builds the ttk styles)
-DARK_BG = ui_tokens.DARK["BG"]
-DARK_BG2 = ui_tokens.DARK["BG2"]
-DARK_PANEL = ui_tokens.DARK["PANEL"]
-DARK_PANEL2 = ui_tokens.DARK["PANEL2"]
-DARK_BORDER = ui_tokens.DARK["BORDER"]
-DARK_FG = ui_tokens.DARK["FG"]
-DARK_MUTED = ui_tokens.DARK["MUTED"]
-DARK_ACCENT = ui_tokens.DARK["ACCENT"]
-DARK_ACCENT2 = ui_tokens.DARK["ACCENT2"]
-DARK_SELECT_BG = ui_tokens.DARK["SELECT_BG"]
-DARK_SELECT_FG = ui_tokens.DARK["SELECT_FG"]
+# Widgets take their colours from ui_theme.active_palette(): dark, or blue in paper
+# mode (ui_tokens holds every colour; ui_theme builds the ttk styles).
 
-# Status colours (training table, live output): idle grey, busy amber, done green.
-STATUS_IDLE = DARK_MUTED
+# Status colours (training table, live output): busy amber, done green; idle is
+# the palette's MUTED grey.
 STATUS_AMBER = ui_tokens.STATUS["warn"]
 STATUS_GREEN = ui_tokens.STATUS["good"]
 STATUS_RED = ui_tokens.STATUS["bad"]
@@ -2547,12 +2537,13 @@ class PowerTraderHub(tk.Tk):
     # ---- menu / layout ----
 
     def _build_menu(self) -> None:
+        p = ui_theme.active_palette()
         menubar = tk.Menu(
             self,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
+            bg=p["BG2"],
+            fg=p["FG"],
+            activebackground=p["SELECT_BG"],
+            activeforeground=p["SELECT_FG"],
             bd=0,
             relief="flat",
         )
@@ -2560,10 +2551,10 @@ class PowerTraderHub(tk.Tk):
         m_file = tk.Menu(
             menubar,
             tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
+            bg=p["BG2"],
+            fg=p["FG"],
+            activebackground=p["SELECT_BG"],
+            activeforeground=p["SELECT_FG"],
         )
         # Trading mode (owner spec: File menu so users don't need the CLI).
         # Paper is the default; Live needs a broker and an explicit confirmation.
@@ -2577,10 +2568,10 @@ class PowerTraderHub(tk.Tk):
         m_settings = tk.Menu(
             menubar,
             tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
+            bg=p["BG2"],
+            fg=p["FG"],
+            activebackground=p["SELECT_BG"],
+            activeforeground=p["SELECT_FG"],
         )
         m_settings.add_command(label="Settings...", command=self.open_settings_dialog)
         m_settings.add_command(
@@ -2592,10 +2583,10 @@ class PowerTraderHub(tk.Tk):
         m_help = tk.Menu(
             menubar,
             tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
+            bg=p["BG2"],
+            fg=p["FG"],
+            activebackground=p["SELECT_BG"],
+            activeforeground=p["SELECT_FG"],
         )
         m_help.add_command(
             label="Dependency Status", command=self.show_dependency_status
@@ -2607,6 +2598,7 @@ class PowerTraderHub(tk.Tk):
         self.config(menu=menubar)
 
     def _build_layout(self) -> None:
+        p = ui_theme.active_palette()
         outer = ttk.Panedwindow(self, orient="horizontal")
         outer.pack(fill="both", expand=True)
 
@@ -2761,13 +2753,13 @@ class PowerTraderHub(tk.Tk):
             trader_row,
             text="Trader:",
             font=ui_tokens.font("caption"),
-            foreground=DARK_MUTED,
+            foreground=p["MUTED"],
         ).pack(side="left")
         self.lbl_trader = ttk.Label(
             trader_row,
             text="stopped",
             font=ui_tokens.font("caption"),
-            foreground=DARK_ACCENT2,
+            foreground=p["ACCENT2"],
         )
         self.lbl_trader.pack(side="left", padx=(2, 12))
 
@@ -2776,7 +2768,7 @@ class PowerTraderHub(tk.Tk):
             trader_row,
             text="Exchange: Checking...",
             font=ui_tokens.font("caption"),
-            foreground=DARK_ACCENT2,
+            foreground=p["ACCENT2"],
             cursor="hand2",
         )
         self.lbl_exchange.pack(side="left")
@@ -2786,7 +2778,7 @@ class PowerTraderHub(tk.Tk):
                 acct_box,
                 text=key,
                 font=ui_tokens.font("caption"),
-                foreground=DARK_MUTED,
+                foreground=p["MUTED"],
             ).grid(row=row, column=col, sticky="w", padx=(4, 6))
             value = ttk.Label(acct_box, text="N/A", font=ui_tokens.font("caption"))
             value.grid(row=row, column=col + 1, sticky="w", padx=(0, 8))
@@ -2814,14 +2806,14 @@ class PowerTraderHub(tk.Tk):
             training_title_row,
             text="Training:",
             font=ui_tokens.font("caption"),
-            foreground=DARK_MUTED,
+            foreground=p["MUTED"],
         ).pack(side="left")
         total_coins = len(self.coins) if self.coins else 0
         self.training_status_label = ttk.Label(
             training_title_row,
             text=f"0/{total_coins} running",
             font=ui_tokens.font("caption"),
-            foreground=DARK_ACCENT2,
+            foreground=p["ACCENT2"],
         )
         self.training_status_label.pack(side="left", padx=(2, 4))
         # Note: TTK buttons don't support 'height' parameter, so we only use 'width'
@@ -2863,14 +2855,14 @@ class PowerTraderHub(tk.Tk):
             training_title_row,
             text="stopped",
             font=ui_tokens.font("caption"),
-            foreground=DARK_ACCENT2,
+            foreground=p["ACCENT2"],
         )
         self.lbl_neural.pack(side="right", padx=(2, 4))
         ttk.Label(
             training_title_row,
             text="Thinking:",
             font=ui_tokens.font("caption"),
-            foreground=DARK_MUTED,
+            foreground=p["MUTED"],
         ).pack(side="right")
 
         # Keep train_coin_var for click handlers but remove dropdown UI
@@ -2947,13 +2939,13 @@ class PowerTraderHub(tk.Tk):
             height=8,
             wrap="none",
             font=self._live_log_font,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-            selectbackground=DARK_SELECT_BG,
-            selectforeground=DARK_SELECT_FG,
-            highlightbackground=DARK_BORDER,
-            highlightcolor=DARK_ACCENT,
+            bg=p["PANEL"],
+            fg=p["FG"],
+            insertbackground=p["FG"],
+            selectbackground=p["SELECT_BG"],
+            selectforeground=p["SELECT_FG"],
+            highlightbackground=p["BORDER"],
+            highlightcolor=p["ACCENT"],
         )
 
         trainer_scroll = ttk.Scrollbar(
@@ -2971,13 +2963,13 @@ class PowerTraderHub(tk.Tk):
             height=8,
             wrap="none",
             font=self._live_log_font,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-            selectbackground=DARK_SELECT_BG,
-            selectforeground=DARK_SELECT_FG,
-            highlightbackground=DARK_BORDER,
-            highlightcolor=DARK_ACCENT,
+            bg=p["PANEL"],
+            fg=p["FG"],
+            insertbackground=p["FG"],
+            selectbackground=p["SELECT_BG"],
+            selectforeground=p["SELECT_FG"],
+            highlightbackground=p["BORDER"],
+            highlightcolor=p["ACCENT"],
         )
 
         runner_scroll = ttk.Scrollbar(
@@ -2995,13 +2987,13 @@ class PowerTraderHub(tk.Tk):
             height=8,
             wrap="none",
             font=self._live_log_font,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-            selectbackground=DARK_SELECT_BG,
-            selectforeground=DARK_SELECT_FG,
-            highlightbackground=DARK_BORDER,
-            highlightcolor=DARK_ACCENT,
+            bg=p["PANEL"],
+            fg=p["FG"],
+            insertbackground=p["FG"],
+            selectbackground=p["SELECT_BG"],
+            selectforeground=p["SELECT_FG"],
+            highlightbackground=p["BORDER"],
+            highlightcolor=p["ACCENT"],
         )
 
         trader_scroll = ttk.Scrollbar(
@@ -3020,9 +3012,9 @@ class PowerTraderHub(tk.Tk):
             log_text.tag_configure("log_long", foreground=STATUS_GREEN)
             log_text.tag_configure("log_short", foreground=LOG_SHORT)
             log_text.tag_configure(
-                "log_state", foreground=DARK_ACCENT2, font=self._live_log_bold
+                "log_state", foreground=p["ACCENT2"], font=self._live_log_bold
             )
-            log_text.tag_configure("log_dim", foreground=DARK_MUTED)
+            log_text.tag_configure("log_dim", foreground=p["MUTED"])
             log_text.tag_raise("sel")
         # Add left panes to vertical PanedWindow (enables drag sash between Controls and Live Output)
         left_split.add(top_controls, weight=0)
@@ -3431,10 +3423,10 @@ class PowerTraderHub(tk.Tk):
         self.hist_list = tk.Listbox(
             hist_wrap,
             height=10,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
-            selectbackground=DARK_SELECT_BG,
-            selectforeground=DARK_SELECT_FG,
+            bg=p["PANEL"],
+            fg=p["FG"],
+            selectbackground=p["SELECT_BG"],
+            selectforeground=p["SELECT_FG"],
             font=ui_tokens.mono("small"),
         )
 
@@ -3748,6 +3740,7 @@ class PowerTraderHub(tk.Tk):
 
     def _create_order_management_tab(self):
         """Create the Order Management tab with order creation forms and monitoring."""
+        p = ui_theme.active_palette()
         try:
             # Initialize order manager
             self.order_manager = get_global_order_manager()
@@ -3920,9 +3913,9 @@ class PowerTraderHub(tk.Tk):
                 notif_text_frame,
                 height=4,
                 wrap="word",
-                bg=DARK_BG2,
-                fg=DARK_FG,
-                insertbackground=DARK_FG,
+                bg=p["BG2"],
+                fg=p["FG"],
+                insertbackground=p["FG"],
             )
             notif_scroll = ttk.Scrollbar(
                 notif_text_frame,
@@ -4725,6 +4718,7 @@ class PowerTraderHub(tk.Tk):
 
     def show_dependency_status(self):
         """Show comprehensive dependency status window."""
+        p = ui_theme.active_palette()
         try:
             if not DEPENDENCY_CHECKER_AVAILABLE:
                 messagebox.showinfo(
@@ -4739,7 +4733,7 @@ class PowerTraderHub(tk.Tk):
             status_window = tk.Toplevel(self)
             status_window.title("PowerTrader - Dependency Status")
             status_window.geometry("800x600")
-            status_window.configure(bg=DARK_BG)
+            status_window.configure(bg=p["BG"])
 
             # Create notebook for different views
             notebook = ttk.Notebook(status_window)
@@ -4766,6 +4760,7 @@ class PowerTraderHub(tk.Tk):
 
     def _create_dependency_overview_tab(self, notebook, results):
         """Create overview tab for dependency status."""
+        p = ui_theme.active_palette()
         overview_frame = ttk.Frame(notebook)
         notebook.add(overview_frame, text="Overview")
 
@@ -4800,8 +4795,8 @@ class PowerTraderHub(tk.Tk):
         status_text = tk.Text(
             status_frame,
             height=15,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
+            bg=p["PANEL"],
+            fg=p["FG"],
             font=ui_tokens.mono("body"),
         )
         status_scrollbar = ttk.Scrollbar(
@@ -4896,6 +4891,7 @@ class PowerTraderHub(tk.Tk):
 
     def _create_install_instructions_tab(self, notebook):
         """Create install instructions tab."""
+        p = ui_theme.active_palette()
         install_frame = ttk.Frame(notebook)
         notebook.add(install_frame, text="Install Instructions")
 
@@ -4916,8 +4912,8 @@ class PowerTraderHub(tk.Tk):
         script_text = tk.Text(
             script_frame,
             height=15,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
+            bg=p["PANEL"],
+            fg=p["FG"],
             font=ui_tokens.mono("small"),
             wrap=tk.WORD,
         )
@@ -5679,25 +5675,23 @@ Platform: {sys.platform}
     def _build_training_table(self) -> None:
         """One cell per coin: status dot, symbol and trained-for. Clicking a cell
         trains the coin, or stops it while it trains (both ask first)."""
+        p = ui_theme.active_palette()
         frame = self.training_status_frame
         for widget in frame.winfo_children():
             widget.destroy()
-        try:
-            bg = ttk.Style().lookup("TFrame", "background") or DARK_BG
-        except Exception:
-            bg = DARK_BG
+        bg = p["BG"]  # the frames' colour
         self._training_cells = {}
         self._training_cell_state: Dict[str, Tuple[str, str, str]] = {}
         for coin in self.coins or []:
             cell = tk.Frame(frame, bg=bg, cursor="hand2")
             tight = {"bg": bg, "bd": 0, "padx": 0, "pady": 0}
             dot = tk.Label(
-                cell, text="●", fg=STATUS_IDLE, font=ui_tokens.font("small"), **tight
+                cell, text="●", fg=p["MUTED"], font=ui_tokens.font("small"), **tight
             )
             sym = tk.Label(
                 cell,
                 text=coin,
-                fg=DARK_FG,
+                fg=p["FG"],
                 font=ui_tokens.font("caption", "bold"),
                 width=5,
                 anchor="w",
@@ -5706,7 +5700,7 @@ Platform: {sys.platform}
             age = tk.Label(
                 cell,
                 text="",
-                fg=DARK_MUTED,
+                fg=p["MUTED"],
                 font=ui_tokens.font("micro"),
                 width=7,
                 anchor="w",
@@ -5715,7 +5709,7 @@ Platform: {sys.platform}
             sig = tk.Label(
                 cell,
                 text="–",
-                fg=DARK_MUTED,
+                fg=p["MUTED"],
                 font=ui_tokens.font("micro", "bold"),
                 width=6,
                 anchor="w",
@@ -5816,11 +5810,12 @@ Platform: {sys.platform}
 
     def _get_status_border_color(self, status: str, coin: str = None) -> str:
         """Status colour of a coin: trained green, training amber, untrained grey."""
+        p = ui_theme.active_palette()
         if status in ("✅", "✓"):  # _training_status_map marks trained coins ✅
             return STATUS_GREEN
         if status in ("●", "○"):
             return STATUS_AMBER
-        return STATUS_IDLE
+        return p["MUTED"]
 
     def _is_recently_trained(self, coin: str, hours_threshold: float = 2.0) -> bool:
         """Check if coin was trained within the threshold hours"""
@@ -7105,21 +7100,22 @@ Platform: {sys.platform}
         (long >= the trade start level and no short), orange while short, dimmed
         when the runner has not rewritten it for 15 minutes; "–" when there is no
         signal file. Only touches the label when the text or colour changes."""
+        p = ui_theme.active_palette()
         info = getattr(self, "_training_signal_info", None)
         if info is not None:
             info[coin] = (longs, shorts, mtime, level)
         if longs is None:
-            state = ("–", DARK_MUTED)
+            state = ("–", p["MUTED"])
         else:
             text = f"L{int(longs)} S{int(shorts or 0)}"
             if mtime is not None and time.time() - float(mtime) > 15 * 60:
-                colour = DARK_MUTED
+                colour = p["MUTED"]
             elif shorts:
                 colour = LOG_SHORT
             elif longs >= level:
                 colour = STATUS_GREEN
             else:
-                colour = DARK_FG
+                colour = p["FG"]
             state = (text, colour)
         cache = getattr(self, "_training_signal_state", None)
         if cache is None:
@@ -7454,6 +7450,7 @@ Platform: {sys.platform}
     def open_chart_settings(self, parent=None):
         """Open (or raise) the Chart settings pop-out: a toggle for every chart overlay
         and candlestick pattern. Each change is saved and redrawn at once."""
+        p = ui_theme.active_palette()
         from pt_chart_patterns import ChartSettingsWindow
 
         win = getattr(self, "_chart_settings_win", None)
@@ -7468,7 +7465,7 @@ Platform: {sys.platform}
         win = ChartSettingsWindow(
             parent or self, self.settings.get("chart"), self._apply_chart_settings
         )
-        win.configure(bg=DARK_BG)
+        win.configure(bg=p["BG"])
         self._chart_settings_win = win
         return win
 
@@ -7488,12 +7485,13 @@ Platform: {sys.platform}
             pass
 
     def open_settings_dialog(self) -> None:
+        p = ui_theme.active_palette()
         win = tk.Toplevel(self)
         win.title("Settings")
         # Big enough for the bottom buttons on most screens + still scrolls if someone resizes smaller.
         win.geometry("860x680")
         win.minsize(760, 560)
-        win.configure(bg=DARK_BG)
+        win.configure(bg=p["BG"])
 
         # Scrollable settings content (auto-hides the scrollbar if everything fits),
         # using the same pattern as the Neural Levels scrollbar.
@@ -7504,9 +7502,9 @@ Platform: {sys.platform}
 
         settings_canvas = tk.Canvas(
             viewport,
-            bg=DARK_BG,
+            bg=p["BG"],
             highlightthickness=1,
-            highlightbackground=DARK_BORDER,
+            highlightbackground=p["BORDER"],
             bd=0,
         )
         settings_canvas.grid(row=0, column=0, sticky="nsew")
