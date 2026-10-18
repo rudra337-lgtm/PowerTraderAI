@@ -160,6 +160,9 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         troughcolor=p["BG"],
         selectbackground=p["SELECT_BG"],
         selectforeground=p["SELECT_FG"],
+        # the dotted keyboard-focus ring of check boxes, radio buttons and notebook
+        # tabs; ttk's default is black, which can't be seen on these backgrounds
+        focuscolor=p["ACCENT"],
     )
     # clam's own state colours are light greys (#EEEBE7 on hover, #DCDAD5 when
     # disabled); every style without a map of its own inherits these instead.
@@ -233,6 +236,7 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         background=p["ACCENT"],
         foreground=p["BG"],
         bordercolor=p["ACCENT"],
+        focuscolor=p["BG"],  # an accent ring would vanish on the accent fill
     )
     style.map(
         "Accent.TButton",

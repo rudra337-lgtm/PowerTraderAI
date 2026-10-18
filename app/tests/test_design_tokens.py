@@ -271,6 +271,35 @@ def test_keyboard_focus_is_visible(tk_root):
     assert style.lookup("TEntry", "bordercolor", ["focus"]) == p["ACCENT2"]
 
 
+@pytest.mark.parametrize("name", ["DARK", "PAPER"])
+def test_every_focus_ring_shows_on_its_widget(tk_root, name):
+    """The dotted focus ring is drawn in focuscolor; with none set, ttk draws it
+    black, invisible on check boxes, radio buttons and notebook tabs (WCAG 2.4.7).
+    A ring needs 3:1 against the widget it sits on (WCAG 1.4.11)."""
+    import ui_theme
+    from tkinter import ttk
+
+    p = getattr(ui_tokens, name)
+    style = ttk.Style(tk_root)
+    ui_theme.apply_theme(tk_root, style, p)
+    rings = (
+        ("TButton", ["focus"]),
+        ("Accent.TButton", ["focus"]),
+        ("ChartTab.TButton", ["focus"]),
+        ("ChartTabSelected.TButton", ["focus"]),
+        ("TCheckbutton", ["focus"]),
+        ("TRadiobutton", ["focus"]),
+        ("TNotebook.Tab", ["focus", "selected"]),  # the focused tab is the selected one
+    )
+    faint = []
+    for widget_style, state in rings:
+        ring = style.lookup(widget_style, "focuscolor", state)
+        under = style.lookup(widget_style, "background", state)
+        if not ring or contrast(ring, under) < 3.0:
+            faint.append((widget_style, ring, under))
+    assert not faint
+
+
 def test_fonts_use_the_system_family_and_tooltips_the_theme(tk_root):
     import tkinter.font as tkfont
     from tkinter import ttk
