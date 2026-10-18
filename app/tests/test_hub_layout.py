@@ -425,6 +425,7 @@ def test_the_tab_row_scrolls_only_while_its_buttons_do_not_fit():
         row._canvas.winfo_width = lambda: visible["px"]
         needed = row.inner.winfo_reqwidth()
         assert needed > 300
+        assert int(row._canvas.cget("width")) == needed  # it asks for all of it
         row._fit()
         assert row.scrolls
         visible["px"] = needed + 50
@@ -536,12 +537,9 @@ def test_the_status_line_sits_in_the_tab_row_after_the_buttons(hub):
     row, slot, bar = hub._chart_tabs_row, hub._chart_status_slot, hub.chart_tabs_bar
     coin, other = hub.coins[0], hub.coins[1]
     hub._show_chart_page(coin)
-    assert row.pack_slaves() == [
-        hub.chart_settings_button,
-        hub._chart_tf_box,
-        bar,
-        slot,
-    ]
+    strip = hub._chart_tabs_strip
+    assert row.pack_slaves() == [hub.chart_settings_button, hub._chart_tf_box, strip]
+    assert strip.grid_slaves(column=0) == [bar] and strip.grid_slaves(column=1) == [slot]
     chart = hub.charts[coin]
     assert chart.status_frame.master is slot and chart.neural_status_label.master is (
         chart.status_frame
@@ -569,24 +567,22 @@ def test_a_destroyed_chart_takes_its_status_line_with_it(hub):
 
 
 def test_the_buttons_shrink_before_the_status_line(hub):
+    """Tk sizes the row: the buttons and the status line share a strip that asks for
+    both widths and is packed last, so it is what gives way. Inside it only the
+    buttons' column has weight, so it narrows first (to MIN_TAB_BUTTONS_W) and the
+    buttons scroll; the status column keeps its width. (A hidden window lays
+    nothing out, so this checks the layout's settings, not pixels.)"""
     hub._show_chart_page(hub.coins[0])
     hub.update_idletasks()
-    row, bar = hub._chart_tabs_row, hub.chart_tabs_bar
-    buttons = bar.inner.winfo_reqwidth()
-    others = sum(
-        w.winfo_reqwidth()
-        + (
-            sum(w.pack_info()["padx"])
-            if isinstance(w.pack_info()["padx"], tuple)
-            else 2 * int(w.pack_info()["padx"])
-        )
-        for w in row.pack_slaves()
-        if w is not bar
-    )
-    for avail, want in ((buttons + others + 200, buttons), (others + 200, 200)):
-        row.winfo_width = lambda a=avail: a
-        hub._fit_chart_tab_row()
-        assert int(bar._canvas.cget("width")) == want, avail
+    row, strip, bar = hub._chart_tabs_row, hub._chart_tabs_strip, hub.chart_tabs_bar
+    assert row.pack_slaves()[-1] is strip
+    assert strip.pack_info()["fill"] == "none" and not int(strip.pack_info()["expand"])
+    buttons, status = strip.grid_columnconfigure(0), strip.grid_columnconfigure(1)
+    assert (buttons["weight"], buttons["minsize"]) == (1, pt_hub.MIN_TAB_BUTTONS_W)
+    assert status["weight"] == 0
+    assert "e" in bar.grid_info()["sticky"] and "w" in bar.grid_info()["sticky"]
+    # the bar asks for all its buttons
+    assert int(bar._canvas.cget("width")) == bar.inner.winfo_reqwidth()
 
 
 def test_the_chart_sits_4px_under_the_buttons_and_the_divider_moves_up(hub):

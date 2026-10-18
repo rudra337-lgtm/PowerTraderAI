@@ -293,6 +293,8 @@ STATUS_TEXT_DROP = 9
 TAB_BUTTON_GAP = SPACE["xs"]
 FORMER_TAB_BUTTON_GAP = SPACE["sm"]
 CHART_STATUS_ROW_PADY = SPACE["sm"]
+# Short of room, the coin buttons narrow to this (and scroll) before the status line
+MIN_TAB_BUTTONS_W = 60
 
 # Live-output colouring: the first rule that matches a line picks its tag.
 _LOG_LINE_RULES = (
@@ -364,8 +366,9 @@ def _atomic_write_text(path: str, content: str) -> None:
 
 
 class ScrollingRow(ttk.Frame):
-    """One row of widgets that scrolls sideways when it is wider than the space it
-    has; the scrollbar shows only then. Children go in ``inner``."""
+    """One row of widgets that asks for its content's full width and scrolls
+    sideways when the layout gives it less; the scrollbar shows only then.
+    Children go in ``inner``."""
 
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
@@ -387,11 +390,6 @@ class ScrollingRow(ttk.Frame):
     def add(self, widget: tk.Widget, padx=(0, 0), pady=(0, 0)) -> None:
         widget.pack(side="left", padx=padx, pady=pady)
 
-    def set_width(self, width: int) -> None:
-        """How wide the visible part of the row is; less than its content scrolls."""
-        if int(float(self._canvas.cget("width"))) != int(width):
-            self._canvas.configure(width=int(width))
-
     @property
     def scrolls(self) -> bool:
         return self._bar.winfo_manager() == "pack"
@@ -399,6 +397,8 @@ class ScrollingRow(ttk.Frame):
     def _fit(self, event=None) -> None:
         width, height = self.inner.winfo_reqwidth(), self.inner.winfo_reqheight()
         self._canvas.configure(height=height, scrollregion=(0, 0, width, height))
+        if int(float(self._canvas.cget("width"))) != width:
+            self._canvas.configure(width=width)
         need = width > self._canvas.winfo_width() > 1
         if need and not self.scrolls:
             self._bar.pack(side="top", fill="x", pady=(0, ui_tokens.SPACE["xs"]))
@@ -7177,42 +7177,23 @@ Platform: {sys.platform}
         self._chart_tf_box, self.chart_tf_combo = box, combo
         self._pack_chart_tf_box()  # packed first, so the buttons get what is left
         # The buttons, then the selected chart's status line straight after them
-        # (owner, 2026-10-14). The buttons are only as wide as their content or what
-        # the status, the Timeframe box and the cog leave, so they scroll first.
-        self.chart_tabs_bar = ScrollingRow(row)
-        self.chart_tabs_bar.pack(side="left", anchor="n")
-        self._chart_status_slot = ttk.Frame(row)
-        self._chart_status_slot.pack(
-            side="left",
-            anchor="n",
+        # (owner, 2026-10-14), in a strip only as wide as both. With less room the
+        # buttons' column narrows first (it has the weight), down to
+        # MIN_TAB_BUTTONS_W, and they scroll; the status line keeps its width.
+        strip = ttk.Frame(row)
+        strip.pack(side="left", anchor="n")
+        strip.columnconfigure(0, weight=1, minsize=MIN_TAB_BUTTONS_W)
+        self._chart_tabs_strip = strip
+        self.chart_tabs_bar = ScrollingRow(strip)
+        self.chart_tabs_bar.grid(row=0, column=0, sticky="new")
+        self._chart_status_slot = ttk.Frame(strip)
+        self._chart_status_slot.grid(
+            row=0,
+            column=1,
+            sticky="nw",
             padx=(SPACE["sm"], 0),
             pady=(STATUS_TEXT_DROP, TAB_BUTTON_GAP),
         )
-        for widget in (row, self._chart_status_slot, self.chart_tabs_bar.inner):
-            widget.bind("<Configure>", self._fit_chart_tab_row, add="+")
-
-    def _fit_chart_tab_row(self, event=None) -> None:
-        """Give the buttons what the row has left after the status line, the
-        Timeframe box and the cog, up to their full width; short of that they
-        scroll."""
-        row = getattr(self, "_chart_tabs_row", None)
-        bar = getattr(self, "chart_tabs_bar", None)
-        if row is None or bar is None:
-            return
-        try:
-            avail = int(row.winfo_width())
-            if avail <= 1:
-                return
-            used = 0
-            for widget in row.pack_slaves():
-                if widget is bar:
-                    continue
-                padx = widget.pack_info().get("padx", 0)
-                pads = sum(padx) if isinstance(padx, tuple) else 2 * int(padx)
-                used += int(widget.winfo_reqwidth()) + pads
-            bar.set_width(max(60, min(bar.inner.winfo_reqwidth(), avail - used)))
-        except Exception:
-            pass
 
     def _show_chart_status(self, name: str) -> None:
         """The selected coin chart's status line, in the tab row. The account chart
@@ -7231,7 +7212,6 @@ Platform: {sys.platform}
                     frame.pack_forget()
             except Exception:
                 pass
-        self._fit_chart_tab_row()
 
     def _moved_status_row_px(self) -> int:
         """How much higher the plot starts than when each coin chart had a status
@@ -7246,8 +7226,8 @@ Platform: {sys.platform}
         return row + FORMER_TAB_BUTTON_GAP - TAB_BUTTON_GAP
 
     def _pack_chart_tf_box(self) -> None:
-        bar = getattr(self, "chart_tabs_bar", None)
-        before = {"before": bar} if bar is not None and bar.winfo_exists() else {}
+        strip = getattr(self, "_chart_tabs_strip", None)
+        before = {"before": strip} if strip is not None and strip.winfo_exists() else {}
         self._chart_tf_box.pack(
             side="right",
             anchor="n",
