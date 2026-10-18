@@ -597,4 +597,17 @@ def test_the_chart_sits_4px_under_the_buttons_and_the_divider_moves_up(hub):
         assert button.pack_info()["pady"] == (0, 4)
     assert hub.chart_settings_button.pack_info()["pady"] == (0, 4)
     label = next(iter(hub.charts.values())).neural_status_label
-    assert hub._moved_status_row_px() == label.winfo_reqheight() + 14 > 14
+    # the old status row (label and its pads) plus what the gap under the buttons
+    # shrank by, measured from the buttons as packed
+    gap = hub._chart_tab_buttons["ACCOUNT"].pack_info()["pady"][1]
+    row = label.winfo_reqheight() + 2 * pt_hub.CHART_STATUS_ROW_PADY
+    assert hub._moved_status_row_px() == row + pt_hub.FORMER_TAB_BUTTON_GAP - gap
+    assert (pt_hub.CHART_STATUS_ROW_PADY, pt_hub.FORMER_TAB_BUTTON_GAP) == (6, 6)
+    # a chart on its own still has that row
+    alone = pt_hub.CandleChart(
+        hub, hub.fetcher, "BTC", hub._settings_getter, hub.trade_history_path
+    )
+    try:
+        assert alone.status_frame.pack_info()["pady"] == pt_hub.CHART_STATUS_ROW_PADY
+    finally:
+        alone.destroy()

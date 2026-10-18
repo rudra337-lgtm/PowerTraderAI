@@ -286,6 +286,13 @@ CHART_FONT_PT = ui_tokens.CHART_FONT_PT
 SPACE = ui_tokens.SPACE  # spacing scale, in pixels
 # Not a gap: how far down the chart status text sits to centre it on the tab buttons
 STATUS_TEXT_DROP = 9
+# The chart tab row (owner, 2026-10-14): the coin buttons sit TAB_BUTTON_GAP above
+# the plot. Before, each coin chart had its status line in a row between them and
+# the plot, CHART_STATUS_ROW_PADY above and below it (a chart on its own still
+# has), and the gap under the buttons was FORMER_TAB_BUTTON_GAP.
+TAB_BUTTON_GAP = SPACE["xs"]
+FORMER_TAB_BUTTON_GAP = SPACE["sm"]
+CHART_STATUS_ROW_PADY = SPACE["sm"]
 
 # Live-output colouring: the first rule that matches a line picks its tag.
 _LOG_LINE_RULES = (
@@ -1069,7 +1076,7 @@ class CandleChart(ttk.Frame):
         # (owner, 2026-10-14); on its own the chart gives it a row above the plot.
         if status_parent is None:
             top = ttk.Frame(self)
-            top.pack(fill="x", padx=6, pady=6)
+            top.pack(fill="x", padx=SPACE["sm"], pady=CHART_STATUS_ROW_PADY)
         else:
             top = ttk.Frame(status_parent)  # packed by the hub while selected
         self.status_frame = top
@@ -3184,7 +3191,7 @@ class PowerTraderHub(tk.Tk):
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
+        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP))
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -3206,7 +3213,7 @@ class PowerTraderHub(tk.Tk):
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
+            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP))
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
@@ -7154,7 +7161,7 @@ Platform: {sys.platform}
             style="ChartCog.TButton",
             command=self.open_chart_settings,
         )
-        cog.pack(side="right", anchor="n", pady=(0, SPACE["xs"]))
+        cog.pack(side="right", anchor="n", pady=(0, TAB_BUTTON_GAP))
         ToolTip(cog, "Chart settings")
         self.chart_settings_button = cog
         box = ttk.Frame(row)
@@ -7179,7 +7186,7 @@ Platform: {sys.platform}
             side="left",
             anchor="n",
             padx=(SPACE["sm"], 0),
-            pady=(STATUS_TEXT_DROP, SPACE["xs"]),
+            pady=(STATUS_TEXT_DROP, TAB_BUTTON_GAP),
         )
         for widget in (row, self._chart_status_slot, self.chart_tabs_bar.inner):
             widget.bind("<Configure>", self._fit_chart_tab_row, add="+")
@@ -7227,13 +7234,16 @@ Platform: {sys.platform}
         self._fit_chart_tab_row()
 
     def _moved_status_row_px(self) -> int:
-        """Height the coin charts' status row used to take above the plot (a label
-        and 6 px above and below it), plus the 2 px less gap under the buttons."""
+        """How much higher the plot starts than when each coin chart had a status
+        row above it: that row (a label with CHART_STATUS_ROW_PADY above and below),
+        plus what the gap under the tab buttons shrank by. The divider under the
+        charts moves up as much, so the chart keeps its height."""
         try:
             label = next(iter(self.charts.values())).neural_status_label
-            return int(label.winfo_reqheight()) + 2 * 6 + 2
-        except Exception:
+        except (AttributeError, StopIteration):
             return 0
+        row = int(label.winfo_reqheight()) + 2 * CHART_STATUS_ROW_PADY
+        return row + FORMER_TAB_BUTTON_GAP - TAB_BUTTON_GAP
 
     def _pack_chart_tf_box(self) -> None:
         bar = getattr(self, "chart_tabs_bar", None)
@@ -7242,7 +7252,7 @@ Platform: {sys.platform}
             side="right",
             anchor="n",
             padx=(SPACE["md"], SPACE["sm"]),
-            pady=(SPACE["sm"], SPACE["xs"]),
+            pady=(SPACE["sm"], TAB_BUTTON_GAP),
             **before,
         )  # level with the buttons, also while the scrollbar shows
 
@@ -7355,7 +7365,7 @@ Platform: {sys.platform}
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
+        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP))
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -7377,7 +7387,7 @@ Platform: {sys.platform}
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
+            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP))
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
