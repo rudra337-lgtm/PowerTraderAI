@@ -887,7 +887,7 @@ class InstitutionalTradingGUI:
 
 if __name__ == "__main__":
     # Test the GUI
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     root.title("Institutional Trading System")
     root.geometry("1200x800")
 

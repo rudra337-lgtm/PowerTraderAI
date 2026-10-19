@@ -248,19 +248,23 @@ class SigLabel:
 @pytest.mark.parametrize(
     "longs, shorts, age, level, text, colour",
     [
-        (None, None, None, 3, "–", pt_hub.DARK_MUTED),  # no signal file
+        (None, None, None, 3, "–", "MUTED"),  # no signal file
         (4, 0, 10, 3, "L4 S0", pt_hub.STATUS_GREEN),
         (3, 0, 10, 3, "L3 S0", pt_hub.STATUS_GREEN),  # the trader starts at 3
-        (2, 0, 10, 3, "L2 S0", pt_hub.DARK_FG),  # below the start level: no trade
+        (2, 0, 10, 3, "L2 S0", "FG"),  # below the start level: no trade
         (1, 0, 10, 1, "L1 S0", pt_hub.STATUS_GREEN),
         (4, 2, 10, 3, "L4 S2", pt_hub.LOG_SHORT),
-        (0, 0, 10, 3, "L0 S0", pt_hub.DARK_FG),
-        (4, 0, 16 * 60, 3, "L4 S0", pt_hub.DARK_MUTED),  # the trader ignores it now
+        (0, 0, 10, 3, "L0 S0", "FG"),
+        (4, 0, 16 * 60, 3, "L4 S0", "MUTED"),  # the trader ignores it now
     ],
 )
 def test_a_cell_shows_the_signal_counts(longs, shorts, age, level, text, colour):
+    """A palette key (FG, MUTED) is the active palette's colour: dark or paper."""
     import time
 
+    import ui_theme
+
+    colour = ui_theme.active_palette().get(colour, colour)
     hub = types.SimpleNamespace(_training_signal_state={})
     label = SigLabel()
     mtime = None if age is None else time.time() - age
@@ -421,6 +425,7 @@ def test_the_tab_row_scrolls_only_while_its_buttons_do_not_fit():
         row._canvas.winfo_width = lambda: visible["px"]
         needed = row.inner.winfo_reqwidth()
         assert needed > 300
+        assert int(row._canvas.cget("width")) == needed  # it asks for all of it
         row._fit()
         assert row.scrolls
         visible["px"] = needed + 50
@@ -532,11 +537,10 @@ def test_the_status_line_sits_in_the_tab_row_after_the_buttons(hub):
     row, slot, bar = hub._chart_tabs_row, hub._chart_status_slot, hub.chart_tabs_bar
     coin, other = hub.coins[0], hub.coins[1]
     hub._show_chart_page(coin)
-    assert row.pack_slaves() == [
-        hub.chart_settings_button,
-        hub._chart_tf_box,
-        bar,
-        slot,
+    strip = hub._chart_tabs_strip
+    assert row.pack_slaves() == [hub.chart_settings_button, hub._chart_tf_box, strip]
+    assert strip.grid_slaves(column=0) == [bar] and strip.grid_slaves(column=1) == [
+        slot
     ]
     chart = hub.charts[coin]
     assert chart.status_frame.master is slot and chart.neural_status_label.master is (
@@ -551,25 +555,36 @@ def test_the_status_line_sits_in_the_tab_row_after_the_buttons(hub):
     assert slot.pack_slaves() == []
 
 
+def test_a_destroyed_chart_takes_its_status_line_with_it(hub):
+    """The status line is a child of the tab row, so destroying one chart on its own
+    left it packed in the row, next to the next chart's."""
+    coin = hub.coins[0]
+    hub._show_chart_page(coin)
+    chart = hub.charts[coin]
+    frame = chart.status_frame
+    assert hub._chart_status_slot.pack_slaves() == [frame]
+    chart.destroy()
+    assert not frame.winfo_exists()
+    assert hub._chart_status_slot.pack_slaves() == []
+
+
 def test_the_buttons_shrink_before_the_status_line(hub):
+    """Tk sizes the row: the buttons and the status line share a strip that asks for
+    both widths and is packed last, so it is what gives way. Inside it only the
+    buttons' column has weight, so it narrows first (to MIN_TAB_BUTTONS_W) and the
+    buttons scroll; the status column keeps its width. (A hidden window lays
+    nothing out, so this checks the layout's settings, not pixels.)"""
     hub._show_chart_page(hub.coins[0])
     hub.update_idletasks()
-    row, bar = hub._chart_tabs_row, hub.chart_tabs_bar
-    buttons = bar.inner.winfo_reqwidth()
-    others = sum(
-        w.winfo_reqwidth()
-        + (
-            sum(w.pack_info()["padx"])
-            if isinstance(w.pack_info()["padx"], tuple)
-            else 2 * int(w.pack_info()["padx"])
-        )
-        for w in row.pack_slaves()
-        if w is not bar
-    )
-    for avail, want in ((buttons + others + 200, buttons), (others + 200, 200)):
-        row.winfo_width = lambda a=avail: a
-        hub._fit_chart_tab_row()
-        assert int(bar._canvas.cget("width")) == want, avail
+    row, strip, bar = hub._chart_tabs_row, hub._chart_tabs_strip, hub.chart_tabs_bar
+    assert row.pack_slaves()[-1] is strip
+    assert strip.pack_info()["fill"] == "none" and not int(strip.pack_info()["expand"])
+    buttons, status = strip.grid_columnconfigure(0), strip.grid_columnconfigure(1)
+    assert (buttons["weight"], buttons["minsize"]) == (1, pt_hub.MIN_TAB_BUTTONS_W)
+    assert status["weight"] == 0
+    assert "e" in bar.grid_info()["sticky"] and "w" in bar.grid_info()["sticky"]
+    # the bar asks for all its buttons
+    assert int(bar._canvas.cget("width")) == bar.inner.winfo_reqwidth()
 
 
 def test_the_chart_sits_4px_under_the_buttons_and_the_divider_moves_up(hub):
@@ -580,4 +595,17 @@ def test_the_chart_sits_4px_under_the_buttons_and_the_divider_moves_up(hub):
         assert button.pack_info()["pady"] == (0, 4)
     assert hub.chart_settings_button.pack_info()["pady"] == (0, 4)
     label = next(iter(hub.charts.values())).neural_status_label
-    assert hub._moved_status_row_px() == label.winfo_reqheight() + 14 > 14
+    # the old status row (label and its pads) plus what the gap under the buttons
+    # shrank by, measured from the buttons as packed
+    gap = hub._chart_tab_buttons["ACCOUNT"].pack_info()["pady"][1]
+    row = label.winfo_reqheight() + 2 * pt_hub.CHART_STATUS_ROW_PADY
+    assert hub._moved_status_row_px() == row + pt_hub.FORMER_TAB_BUTTON_GAP - gap
+    assert (pt_hub.CHART_STATUS_ROW_PADY, pt_hub.FORMER_TAB_BUTTON_GAP) == (6, 6)
+    # a chart on its own still has that row
+    alone = pt_hub.CandleChart(
+        hub, hub.fetcher, "BTC", hub._settings_getter, hub.trade_history_path
+    )
+    try:
+        assert alone.status_frame.pack_info()["pady"] == pt_hub.CHART_STATUS_ROW_PADY
+    finally:
+        alone.destroy()

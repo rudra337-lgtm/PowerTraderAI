@@ -21,7 +21,8 @@ The point is to make pattern claims inspectable and questionable, not to act on 
 ## 2. Background: the chart today
 
 The live chart is `CandleChart` in `app/pt_hub.py`: one matplotlib Axes on a Tk canvas. It is created for each coin tab.
-`app/pt_hub_chart_components.py` has another `CandleChart`, but nothing imports it.
+A second, unused `CandleChart` in `app/pt_hub_chart_components.py` was removed with the design-token work
+(PR #167).
 
 | Aspect | Today |
 |---|---|
@@ -329,14 +330,14 @@ or this spec, it is listed here:
 ## 7. Display and interaction (phase 1)
 
 **Labels.**
-- **Style:** a small text label above (bullish), below (bearish) or beside (none) its candle. The text is in `DARK_FG`,
-  at least 4.5:1 against `DARK_PANEL`, and direction is shown by a glyph, not by hue: ▲ bullish, ▼ bearish, ◆ none.
+- **Style:** a small text label above (bullish), below (bearish) or beside (none) its candle. The text is in `ui_tokens.CHART["text"]`,
+  at least 4.5:1 against `CHART["plot"]`, and direction is shown by a glyph, not by hue: ▲ bullish, ▼ bearish, ◆ none.
   For example "▲ Hammer".
 - **Hit target:** each label has a box of at least 24 × 24 px, which is the hover and click target. Candles themselves
   are about 6 px wide at the hub's normal size.
 
 **Hover.**
-- **Bracket:** hovering a label brackets the pattern's exact window and its trend-context bars, in a dashed `DARK_FG`
+- **Bracket:** hovering a label brackets the pattern's exact window and its trend-context bars, in a dashed `CHART["text"]`
   outline (at least 3:1).
 - **Text:** a one-line plain explanation.
 - **Arrows:** a trend arrow into the pattern (from the §5.3 rule) and, once enough later bars have closed, an arrow
@@ -361,7 +362,7 @@ or this spec, it is listed here:
 **Code.**
 - **Detection module:** a new pure module `app/candlestick_patterns.py`, with no Tk and no matplotlib. Its input is
   OHLC with open timestamps, and it returns `(pattern_id, direction, type, first_open, last_open, context_first_open)`.
-- **Chart wiring:** lives in `pt_hub.CandleChart`, not in `pt_hub_chart_components.py`.
+- **Chart wiring:** lives in `pt_hub.CandleChart`.
 - **Naming:** UI text always says "candlestick pattern", so it is never confused with the trained "pattern model",
   whose output is the blue and orange level lines.
 - **Placement:** the module stays out of `app/strategies/`, so it carries no strategy meaning.
@@ -506,8 +507,8 @@ that nothing reads (`dark_theme`), and this must not become another.
 
 ## 9. Colour and accessibility
 
-**Criteria.** These are checked by a test that composites each colour at its drawn alpha (0.9) on `DARK_PANEL`:
-1. each candle colour is at least 3:1 against `DARK_PANEL` (WCAG 1.4.11), also under simulated protanopia and
+**Criteria.** These are checked by a test that composites each colour at its drawn alpha (0.9) on `CHART["plot"]`:
+1. each candle colour is at least 3:1 against `CHART["plot"]` (WCAG 1.4.11), also under simulated protanopia and
    deuteranopia (Machado 2009);
 2. up and down differ by ΔE2000 ≥ 20 under both simulations, or `hollow_up` is on.
 
@@ -528,7 +529,7 @@ that nothing reads (`dark_theme`), and this must not become another.
 - **Not an accessible option:** the hub's `STATUS_GREEN` #4CAF50 and `STATUS_RED` #FF6B6B are equally bright (1.00:1).
   Under deuteranopia they are harder to tell apart than today's colours (ΔE2000 from about 14 down to 4.5).
 
-**Labels and overlays.** Labels, brackets and arrows use `DARK_FG` (§7), so they never reuse a candle or overlay
+**Labels and overlays.** Labels, brackets and arrows use `CHART["text"]` (§7), so they never reuse a candle or overlay
 colour.
 
 **Out of scope here, noted for a separate change:** the blue long-level line (1.64:1) and the purple ASK line (1.80:1)
@@ -689,7 +690,7 @@ Phase 2 needs:
 5. **Labels (tests):**
    - placement by open timestamp, surviving a redraw and a one-bar shift;
    - merging, precedence, the "+n" badge, and the cap of 12 with the hidden-count note;
-   - glyphs and `DARK_FG` text.
+   - glyphs and `CHART["text"]` text.
 6. **Chart settings (tests):**
    - The pop-out opens from the Settings window and from the chart toolbar, and only one is open at a time. The
      toolbar button shows only the cog and sits at the far right, after "Last:".

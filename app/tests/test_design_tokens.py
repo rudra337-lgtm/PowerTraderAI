@@ -18,6 +18,7 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 import ui_tokens  # noqa: E402
+from helpers_colour import contrast  # noqa: E402
 
 HUB_MODULES = (  # the main window and its dialogs
     "pt_hub.py",
@@ -47,22 +48,14 @@ def _source(module):
         return f.read()
 
 
-def _luminance(colour):
-    from matplotlib.colors import to_rgb
-
-    def channel(v):
-        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
-
-    r, g, b = to_rgb(colour)
-    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-
-
-def contrast(a, b):
-    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
-    return (hi + 0.05) / (lo + 0.05)
-
-
 # --- tokens ---------------------------------------------------------------------------
+
+
+def test_the_contrast_helper_spans_1_to_21_for_strings_and_tuples():
+    assert contrast("#000", "#FFFFFF") == pytest.approx(21.0)
+    assert contrast((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)) == pytest.approx(21.0)
+    assert contrast("#777777", (119 / 255,) * 3) == pytest.approx(1.0)
+    assert contrast("#767676", "#FFFFFF") == pytest.approx(4.54, abs=0.01)
 
 
 def test_both_palettes_define_the_same_tokens():
@@ -114,7 +107,19 @@ def test_banner_text_is_readable():
 
 
 def test_the_type_scale_and_spacing_scale():
-    assert ui_tokens.font("caption", "bold") == (ui_tokens.FAMILY, 8, "bold")
+    names = {
+        ui_tokens.font(role, *styles)
+        for role in ui_tokens.FONT_SIZES
+        for styles in ((), ("bold",), ("italic",), ("bold", "italic"))
+    }
+    assert len(names) == 4 * len(ui_tokens.FONT_SIZES)  # one font per role and style
+    assert ui_tokens.font("body", "italic", "bold") == ui_tokens.font(
+        "body", "bold", "italic"
+    )
+    with pytest.raises(KeyError):
+        ui_tokens.font("huge")
+    with pytest.raises(ValueError):
+        ui_tokens.font("body", "underline")
     assert ui_tokens.mono("small") == (ui_tokens.MONO_FAMILY, 9)
     sizes = list(ui_tokens.FONT_SIZES.values())
     assert sizes == sorted(sizes)
@@ -146,6 +151,18 @@ def test_ui_modules_repeat_no_colour_or_font_literal(module):
     assert not re.findall(r"colou?rs\s*=\s*\[\s*[\"'][A-Za-z]", source)
     assert not re.findall(r"font\s*=\s*\(\s*[\"']", source)
     assert 'DARK_BG = "' not in source  # no copied palette
+
+
+@pytest.mark.parametrize("module", [m for m in UI_MODULES if m != "ui_theme.py"])
+def test_no_ui_module_keeps_a_second_name_for_a_palette(module):
+    """pt_paper_mode re-exported DARK_PALETTE, PAPER_PALETTE and get_palette
+    alongside ui_tokens: two names to keep in step for every palette. (ui_theme
+    keeps the active palette, its own state.)"""
+    source = _source(module)
+    assert not re.findall(
+        r"(?m)^\w+\s*(?::[^=\n]+)?=\s*ui_tokens\.(?:DARK|PAPER)\b", source
+    )
+    assert "def get_palette" not in source
 
 
 @pytest.mark.parametrize("module", UI_MODULES)
@@ -234,11 +251,11 @@ def test_one_palette_styles_every_widget(tk_root, name):
     scrollbars and the chart tabs dark on blue frames."""
     from tkinter import ttk
 
-    import pt_paper_mode
+    import ui_theme
 
     p = getattr(ui_tokens, name)
     style = ttk.Style(tk_root)
-    pt_paper_mode.apply_palette_to_style(tk_root, style, p)  # paper mode's entry
+    ui_theme.apply_theme(tk_root, style, p)  # the one entry, for either mode
     for widget_style, option, key in EVERY_STYLE:
         assert str(style.lookup(widget_style, option)).upper() == p[key].upper(), (
             widget_style,
@@ -271,6 +288,35 @@ def test_keyboard_focus_is_visible(tk_root):
     assert style.lookup("TEntry", "bordercolor", ["focus"]) == p["ACCENT2"]
 
 
+@pytest.mark.parametrize("name", ["DARK", "PAPER"])
+def test_every_focus_ring_shows_on_its_widget(tk_root, name):
+    """The dotted focus ring is drawn in focuscolor; with none set, ttk draws it
+    black, invisible on check boxes, radio buttons and notebook tabs (WCAG 2.4.7).
+    A ring needs 3:1 against the widget it sits on (WCAG 1.4.11)."""
+    import ui_theme
+    from tkinter import ttk
+
+    p = getattr(ui_tokens, name)
+    style = ttk.Style(tk_root)
+    ui_theme.apply_theme(tk_root, style, p)
+    rings = (
+        ("TButton", ["focus"]),
+        ("Accent.TButton", ["focus"]),
+        ("ChartTab.TButton", ["focus"]),
+        ("ChartTabSelected.TButton", ["focus"]),
+        ("TCheckbutton", ["focus"]),
+        ("TRadiobutton", ["focus"]),
+        ("TNotebook.Tab", ["focus", "selected"]),  # the focused tab is the selected one
+    )
+    faint = []
+    for widget_style, state in rings:
+        ring = style.lookup(widget_style, "focuscolor", state)
+        under = style.lookup(widget_style, "background", state)
+        if not ring or contrast(ring, under) < 3.0:
+            faint.append((widget_style, ring, under))
+    assert not faint
+
+
 def test_fonts_use_the_system_family_and_tooltips_the_theme(tk_root):
     import tkinter.font as tkfont
     from tkinter import ttk
@@ -281,7 +327,13 @@ def test_fonts_use_the_system_family_and_tooltips_the_theme(tk_root):
     p = ui_tokens.PAPER
     ui_theme.apply_theme(tk_root, ttk.Style(tk_root), p)
     family = tkfont.nametofont("TkDefaultFont", root=tk_root).actual("family")
-    assert ui_tokens.FAMILY == family  # not Arial, the fallback for "TkDefaultFont"
+    caption = tkfont.Font(
+        root=tk_root, name=ui_tokens.font("caption", "bold"), exists=True
+    )
+    # not Arial, Tk's fallback for a tuple naming "TkDefaultFont" as its family
+    assert caption.actual("family") == family
+    assert caption.actual("weight") == "bold"
+    assert caption.actual("size") == ui_tokens.FONT_SIZES["caption"]
     widget = ttk.Label(tk_root, text="x")
     widget.pack()
     tip = pt_hub.ToolTip(widget, "explained")
@@ -293,6 +345,25 @@ def test_fonts_use_the_system_family_and_tooltips_the_theme(tk_root):
         family
     )
     tip.on_leave()
+
+
+def test_applying_the_theme_leaves_the_tokens_unchanged(tk_root):
+    """apply_theme used to write the system family into ui_tokens.FAMILY, so a font
+    built before it (or in a window that never applied it) was Arial, and the value
+    carried over from one test to the next."""
+    import copy
+
+    import ui_theme
+    from tkinter import ttk
+
+    before = {
+        k: copy.deepcopy(v)
+        for k, v in vars(ui_tokens).items()
+        if not k.startswith("__") and not callable(v)
+    }
+    ui_theme.apply_theme(tk_root, ttk.Style(tk_root), ui_tokens.PAPER)
+    after = {k: v for k, v in vars(ui_tokens).items() if k in before}
+    assert after == before
 
 
 # --- states: no light clam colour leaks in any state ---------------------------------
@@ -314,6 +385,9 @@ STATE_STYLES = (
     "Treeview.Heading",
     "Vertical.TScrollbar",
     "Horizontal.TScrollbar",
+    "Horizontal.TProgressbar",
+    "TNotebook",
+    "TLabelframe",
 )
 STATES = (
     (),
@@ -337,14 +411,17 @@ COLOURS = (
     "selectbackground",
     "selectforeground",
     "troughcolor",
+    "lightcolor",  # clam's inner outline: light greys, darker when pressed,
+    "darkcolor",  # blue round a focused entry
 )
 
 
 @pytest.mark.parametrize("name", ["DARK", "PAPER"])
 def test_every_state_takes_its_colours_from_the_palette(tk_root, name):
     """clam's own state colours are light greys and a blue: a hovered or disabled
-    checkbox turned #EEEBE7 behind FG text (1.3:1), a disabled combo looked enabled
-    and focused combos had a #4A6984 border."""
+    checkbox turned #EEEBE7 behind FG text (1.3:1), a disabled combo looked enabled,
+    focused combos had a #4A6984 border, and the inner outline of buttons, fields,
+    tabs and scrollbars stayed clam's greys (#6F9DC6 round a focused entry)."""
     import ui_theme
     from tkinter import ttk
 
@@ -372,7 +449,7 @@ def test_text_is_readable_in_every_state(tk_root, name):
     ui_theme.apply_theme(tk_root, style, p)
     low = []
     for widget_style in STATE_STYLES:
-        if widget_style.endswith("Scrollbar"):
+        if widget_style.endswith(("Scrollbar", "Progressbar")):
             continue  # no text
         fields = widget_style in ("TEntry", "TCombobox", "TSpinbox", "Treeview")
         for state in STATES:
@@ -382,6 +459,29 @@ def test_text_is_readable_in_every_state(tk_root, name):
             if fg and bg and contrast(fg, bg) < 4.5:
                 low.append((widget_style, state, fg, bg, round(contrast(fg, bg), 2)))
     assert not low
+
+
+def test_a_pressed_button_shows_its_pressed_colours(tk_root):
+    """ttk takes the first state in a map that matches, and a button under the mouse
+    is both active and pressed: with "active" listed first, TButton and the chart
+    tabs never showed their pressed colour."""
+    import ui_theme
+    from tkinter import ttk
+
+    style = ttk.Style(tk_root)
+    ui_theme.apply_theme(tk_root, style, ui_tokens.DARK)
+    hidden = []
+    for widget_style in STATE_STYLES:
+        for option in COLOURS:
+            pressed = style.lookup(widget_style, option, ["pressed"])
+            if pressed == style.lookup(widget_style, option):
+                continue  # no pressed colour of its own
+            if style.lookup(widget_style, option, ["active", "pressed"]) != pressed:
+                hidden.append((widget_style, option))
+    assert not hidden
+    assert style.lookup("TButton", "background", ["active", "pressed"]) == (
+        ui_tokens.DARK["PANEL"]
+    )
 
 
 def test_disabled_fields_look_disabled(tk_root):
@@ -462,6 +562,71 @@ def test_classic_widgets_take_the_palette(tk_root):
         frame.destroy()
 
 
+CLASSIC_TEXT_WIDGETS = {"Label", "Button", "Text", "Entry", "Listbox", "Message"}
+
+
+@pytest.mark.parametrize("module", UI_MODULES)
+def test_a_classic_widget_that_sets_its_background_sets_its_text_colour(module):
+    """The default text colour comes from the theme's option database, so a widget
+    that paints its own background picks its text colour too: the dependency
+    labels were black on PANEL (1.1:1) in a window run on its own."""
+    import ast
+
+    missing = []
+    for node in ast.walk(ast.parse(_source(module))):
+        func = getattr(node, "func", None)
+        if not (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "tk"
+            and func.attr in CLASSIC_TEXT_WIDGETS
+        ):
+            continue
+        options = {k.arg for k in node.keywords}
+        if options & {"bg", "background"} and not options & {"fg", "foreground"}:
+            missing.append((func.attr, node.lineno))
+    assert not missing
+
+
+@pytest.mark.parametrize("module", FEATURE_MODULES)
+def test_a_feature_window_run_on_its_own_builds_a_themed_root(module):
+    """A bare tk.Tk() has no option database: the institutional event log was
+    light text on white and its titles plain labels."""
+    source = _source(module)
+    assert "tk.Tk()" not in source
+    if "__main__" in source:
+        assert "ui_theme.themed_root()" in source
+
+
+def test_a_themed_root_looks_like_the_hub():
+    import tkinter as tk
+    from tkinter import ttk
+
+    import ui_theme
+
+    root, error = None, None
+    for _ in range(10):  # Tk sometimes fails to read init.tcl on the first try
+        try:
+            root = ui_theme.themed_root()
+            break
+        except tk.TclError as exc:
+            error = exc
+    if root is None:
+        pytest.skip(f"Tk not available: {error}")
+    root.withdraw()
+    p = ui_tokens.DARK
+    try:
+        log = tk.Text(root)
+        assert str(log.cget("background")).upper() == p["PANEL"].upper()
+        assert str(log.cget("foreground")).upper() == p["FG"].upper()
+        assert str(tk.Label(root).cget("foreground")).upper() == p["FG"].upper()
+        style = ttk.Style(root)
+        assert style.lookup("Title.TLabel", "font")
+        assert style.lookup("Header.TLabel", "font")
+    finally:
+        root.destroy()
+
+
 def test_theme_figure_gives_charts_the_chart_surfaces():
     from matplotlib.colors import to_hex
     from matplotlib.figure import Figure
@@ -486,6 +651,111 @@ def test_theme_figure_gives_charts_the_chart_surfaces():
     assert to_hex(plain.get_color()) == c["text"].lower()
     assert to_hex(own.get_color()) == ui_tokens.STATUS["bad"].lower()
     assert to_hex(ax.get_legend().get_texts()[0].get_color()) == c["text"].lower()
+
+
+def test_theme_figure_keeps_a_title_or_axis_label_given_its_own_colour():
+    """It recoloured the title and axis labels whatever their colour."""
+    from matplotlib.colors import to_hex
+    from matplotlib.figure import Figure
+
+    import ui_theme
+
+    bad, good = ui_tokens.STATUS["bad"], ui_tokens.STATUS["good"]
+    fig = Figure()
+    ax = fig.add_subplot()
+    ax.plot([1, 2], [3, 4])
+    ax.set_title("Loss", color=bad)
+    ax.set_ylabel("Equity", color=good)  # coloured like its series
+    ax.set_xlabel("Date")
+    ui_theme.theme_figure(fig)
+    assert to_hex(ax.title.get_color()) == bad.lower()
+    assert to_hex(ax.yaxis.label.get_color()) == good.lower()
+    assert to_hex(ax.xaxis.label.get_color()) == ui_tokens.CHART["text"].lower()
+
+
+# --- the hub --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def hub(monkeypatch):
+    import helpers_trainer as ht
+
+    hub = ht.build_real_hub(monkeypatch)  # skips when Tk cannot start
+    yield hub
+    ht.close_hub(hub)
+
+
+def _classic_widgets(parent):
+    from tkinter import ttk
+
+    for child in parent.winfo_children():
+        if not isinstance(child, ttk.Widget):
+            yield child
+        yield from _classic_widgets(child)
+
+
+def test_classic_widgets_in_the_hub_have_readable_text_and_selections(hub):
+    """Selected Trade History rows were light grey on cyan (DARK_FG on ACCENT2,
+    1.0:1)."""
+    low = []
+    for widget in _classic_widgets(hub):
+        if widget.winfo_class() not in CLASSIC_TEXT_WIDGETS:
+            continue  # canvases and frames show no text
+        keys = widget.keys()
+        for fg, bg in (
+            ("foreground", "background"),
+            ("selectforeground", "selectbackground"),
+        ):
+            if fg in keys and bg in keys:
+                # Tk resolves names such as SystemHighlightText
+                a, b = (
+                    "#%02X%02X%02X" % tuple(v // 257 for v in widget.winfo_rgb(c))
+                    for c in (widget.cget(fg), widget.cget(bg))
+                )
+                if contrast(a, b) < 4.5:
+                    low.append((widget.winfo_class(), str(widget), fg, a, b))
+    assert not low
+
+
+def test_the_hubs_classic_widgets_take_the_active_palette(hub):
+    """pt_hub passed fixed DARK_* colours to its classic widgets, so in paper mode
+    the Settings and Chart settings windows, the live logs, the menus and Trade
+    History stayed dark navy inside the blue frames."""
+    import tkinter as tk
+
+    import ui_theme
+
+    p = ui_tokens.PAPER
+    assert hub._paper_mode and ui_theme.active_palette() is p  # tests run in paper
+
+    def colour(widget, option):
+        return str(widget.cget(option)).upper()
+
+    menubar = hub.nametowidget(hub["menu"])
+    assert colour(menubar, "background") == p["BG2"].upper()
+    for text in (hub.trainer_text, hub.runner_text, hub.trader_text, hub.hist_list):
+        assert colour(text, "background") == p["PANEL"].upper()
+        assert colour(text, "selectbackground") == p["SELECT_BG"].upper()
+        assert colour(text, "selectforeground") == p["SELECT_FG"].upper()
+    hub.open_settings_dialog()
+    settings = [
+        w
+        for w in hub.winfo_children()
+        if isinstance(w, tk.Toplevel) and w.title() == "Settings"
+    ][-1]
+    assert colour(settings, "background") == p["BG"].upper()
+    canvases = [w for w in _classic_widgets(settings) if w.winfo_class() == "Canvas"]
+    assert canvases
+    assert all(colour(c, "background") == p["BG"].upper() for c in canvases)
+    assert colour(hub.open_chart_settings(), "background") == p["BG"].upper()
+
+
+def test_the_hub_names_no_fixed_palette():
+    """The palette is chosen at start-up (dark, or paper blue); a colour taken from
+    ui_tokens.DARK directly stays dark in paper mode."""
+    source = _source("pt_hub.py")
+    assert not re.findall(r"\bDARK_[A-Z]", source)
+    assert "ui_tokens.DARK" not in source
 
 
 # --- the exchange window --------------------------------------------------------------

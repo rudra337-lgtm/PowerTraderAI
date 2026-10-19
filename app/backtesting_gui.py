@@ -47,7 +47,7 @@ class BacktestingGUI:
     def __init__(self, parent=None):
         """Initialize the Backtesting GUI."""
         if parent is None:
-            self.root = tk.Tk()
+            self.root = ui_theme.themed_root()
             self.root.title("Backtesting Framework")
             self.root.geometry("1400x900")
         else:
@@ -106,6 +106,7 @@ class BacktestingGUI:
             text="python app/install_optional_deps.py",
             font=ui_tokens.mono("body"),
             background=p["PANEL"],
+            foreground=p["FG"],
         ).pack(pady=5)
 
         features = [
@@ -1244,7 +1245,7 @@ This is a mean-reversion strategy that works well in ranging markets.""",
 
 def main():
     """Run the Backtesting GUI."""
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     app = BacktestingGUI(root)
     root.mainloop()
 

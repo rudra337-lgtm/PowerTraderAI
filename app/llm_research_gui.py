@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from tkinter import messagebox, scrolledtext, ttk
 from typing import Any, Dict, List, Optional
 
+import ui_theme
 import ui_tokens
 
 try:
@@ -1168,7 +1169,7 @@ def create_research_engine_tab(parent, config: Dict = None):
 
 if __name__ == "__main__":
     # Test the GUI
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     root.title("LLM Research Engine - Test")
     root.geometry("1200x800")
 

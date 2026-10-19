@@ -49,7 +49,7 @@ class PerformanceAttributionGUI:
     def __init__(self, parent=None):
         """Initialize the Performance Attribution GUI."""
         if parent is None:
-            self.root = tk.Tk()
+            self.root = ui_theme.themed_root()
             self.root.title("Performance Attribution Analysis")
             self.root.geometry("1400x900")
         else:
@@ -109,6 +109,7 @@ class PerformanceAttributionGUI:
             text="python app/install_optional_deps.py",
             font=ui_tokens.mono("body"),
             background=p["PANEL"],
+            foreground=p["FG"],
         ).pack(pady=5)
 
         features = [
@@ -1270,7 +1271,7 @@ class PerformanceAttributionGUI:
 
 def main():
     """Run the Performance Attribution GUI."""
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     app = PerformanceAttributionGUI(root)
     root.mainloop()
 

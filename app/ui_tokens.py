@@ -113,15 +113,22 @@ FONT_SIZES: Dict[str, int] = {
     "title": 12,
     "display": 14,
 }
-# The system UI family (Segoe UI on Windows). ui_theme.apply_theme reads it from Tk's
-# own default font; until then a tuple naming "TkDefaultFont" falls back to Arial.
-FAMILY = "TkDefaultFont"
+FONT_STYLES = ("bold", "italic")
 MONO_FAMILY = "Consolas"
 
 
-def font(role: str, *styles: str) -> Tuple:
-    """A Tk font tuple for a role in the type scale, e.g. font("caption", "bold")."""
-    return (FAMILY, FONT_SIZES[role], *styles)
+def font(role: str, *styles: str) -> str:
+    """The Tk named font for a role in the type scale, e.g. font("caption", "bold").
+
+    ui_theme.apply_theme creates the named fonts in each Tk interpreter, in the
+    system UI family (Segoe UI on Windows), the one widgets without a font of their
+    own use. A font tuple can't name that family: Tk reads "TkDefaultFont" in a
+    tuple as a family it doesn't have, and falls back to Arial."""
+    FONT_SIZES[role]  # an unknown role is a KeyError
+    unknown = set(styles) - set(FONT_STYLES)
+    if unknown:
+        raise ValueError(f"font styles are {FONT_STYLES}, not {sorted(unknown)}")
+    return "-".join(("pt", role, *sorted(set(styles))))
 
 
 def mono(role: str) -> Tuple:

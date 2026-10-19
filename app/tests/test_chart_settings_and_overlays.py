@@ -21,6 +21,9 @@ if APP_DIR not in sys.path:
 import candlestick_patterns as cp  # noqa: E402
 import chart_settings as cs  # noqa: E402
 import ui_tokens  # noqa: E402
+from helpers_colour import contrast as _contrast  # noqa: E402
+from helpers_colour import linear as _lin  # noqa: E402
+from helpers_colour import rgb as _rgb  # noqa: E402
 from test_candlestick_patterns import NOT_ON_SCREEN  # noqa: E402
 from market_data import listing  # noqa: E402
 
@@ -203,15 +206,6 @@ MACHADO = {  # Machado, Oliveira and Fernandes (2009), severity 1.0, on linear R
 }
 
 
-def _rgb(h):
-    h = h.lstrip("#")
-    return tuple(int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
-
-
-def _lin(c):
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-
 def _gamma(c):
     c = min(1.0, max(0.0, c))
     return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
@@ -227,15 +221,6 @@ def _simulate(rgb, kind):
     lin = [_lin(c) for c in rgb]
     m = MACHADO[kind]
     return tuple(_gamma(sum(m[r][k] * lin[k] for k in range(3))) for r in range(3))
-
-
-def _contrast(a, b):
-    def lum(rgb):
-        r, g, bl = (_lin(c) for c in rgb)
-        return 0.2126 * r + 0.7152 * g + 0.0722 * bl
-
-    hi, lo = sorted((lum(a), lum(b)), reverse=True)
-    return (hi + 0.05) / (lo + 0.05)
 
 
 def _lab(rgb):

@@ -45,7 +45,6 @@ from pt_paper_mode import (
     PaperBanner,
     attach_trading_section_label,
     fetch_binance_btc_price,
-    get_palette,
     run_sample_scenario,
 )
 import trainer_guard
@@ -268,21 +267,11 @@ class ToolTip:
             self.tooltip_window = None
 
 
-# The dark palette (ui_tokens holds every colour; ui_theme builds the ttk styles)
-DARK_BG = ui_tokens.DARK["BG"]
-DARK_BG2 = ui_tokens.DARK["BG2"]
-DARK_PANEL = ui_tokens.DARK["PANEL"]
-DARK_PANEL2 = ui_tokens.DARK["PANEL2"]
-DARK_BORDER = ui_tokens.DARK["BORDER"]
-DARK_FG = ui_tokens.DARK["FG"]
-DARK_MUTED = ui_tokens.DARK["MUTED"]
-DARK_ACCENT = ui_tokens.DARK["ACCENT"]
-DARK_ACCENT2 = ui_tokens.DARK["ACCENT2"]
-DARK_SELECT_BG = ui_tokens.DARK["SELECT_BG"]
-DARK_SELECT_FG = ui_tokens.DARK["SELECT_FG"]
+# Widgets take their colours from ui_theme.active_palette(): dark, or blue in paper
+# mode (ui_tokens holds every colour; ui_theme builds the ttk styles).
 
-# Status colours (training table, live output): idle grey, busy amber, done green.
-STATUS_IDLE = DARK_MUTED
+# Status colours (training table, live output): busy amber, done green; idle is
+# the palette's MUTED grey.
 STATUS_AMBER = ui_tokens.STATUS["warn"]
 STATUS_GREEN = ui_tokens.STATUS["good"]
 STATUS_RED = ui_tokens.STATUS["bad"]
@@ -296,6 +285,15 @@ CHART_FONT_PT = ui_tokens.CHART_FONT_PT
 SPACE = ui_tokens.SPACE  # spacing scale, in pixels
 # Not a gap: how far down the chart status text sits to centre it on the tab buttons
 STATUS_TEXT_DROP = 9
+# The chart tab row (owner, 2026-10-14): the coin buttons sit TAB_BUTTON_GAP above
+# the plot. Before, each coin chart had its status line in a row between them and
+# the plot, CHART_STATUS_ROW_PADY above and below it (a chart on its own still
+# has), and the gap under the buttons was FORMER_TAB_BUTTON_GAP.
+TAB_BUTTON_GAP = SPACE["xs"]
+FORMER_TAB_BUTTON_GAP = SPACE["sm"]
+CHART_STATUS_ROW_PADY = SPACE["sm"]
+# Short of room, the coin buttons narrow to this (and scroll) before the status line
+MIN_TAB_BUTTONS_W = 60
 
 # Live-output colouring: the first rule that matches a line picks its tag.
 _LOG_LINE_RULES = (
@@ -367,8 +365,9 @@ def _atomic_write_text(path: str, content: str) -> None:
 
 
 class ScrollingRow(ttk.Frame):
-    """One row of widgets that scrolls sideways when it is wider than the space it
-    has; the scrollbar shows only then. Children go in ``inner``."""
+    """One row of widgets that asks for its content's full width and scrolls
+    sideways when the layout gives it less; the scrollbar shows only then.
+    Children go in ``inner``."""
 
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
@@ -390,11 +389,6 @@ class ScrollingRow(ttk.Frame):
     def add(self, widget: tk.Widget, padx=(0, 0), pady=(0, 0)) -> None:
         widget.pack(side="left", padx=padx, pady=pady)
 
-    def set_width(self, width: int) -> None:
-        """How wide the visible part of the row is; less than its content scrolls."""
-        if int(float(self._canvas.cget("width"))) != int(width):
-            self._canvas.configure(width=int(width))
-
     @property
     def scrolls(self) -> bool:
         return self._bar.winfo_manager() == "pack"
@@ -402,6 +396,8 @@ class ScrollingRow(ttk.Frame):
     def _fit(self, event=None) -> None:
         width, height = self.inner.winfo_reqwidth(), self.inner.winfo_reqheight()
         self._canvas.configure(height=height, scrollregion=(0, 0, width, height))
+        if int(float(self._canvas.cget("width"))) != width:
+            self._canvas.configure(width=width)
         need = width > self._canvas.winfo_width() > 1
         if need and not self.scrolls:
             self._bar.pack(side="top", fill="x", pady=(0, ui_tokens.SPACE["xs"]))
@@ -1079,7 +1075,7 @@ class CandleChart(ttk.Frame):
         # (owner, 2026-10-14); on its own the chart gives it a row above the plot.
         if status_parent is None:
             top = ttk.Frame(self)
-            top.pack(fill="x", padx=6, pady=6)
+            top.pack(fill="x", padx=SPACE["sm"], pady=CHART_STATUS_ROW_PADY)
         else:
             top = ttk.Frame(status_parent)  # packed by the hub while selected
         self.status_frame = top
@@ -1165,6 +1161,18 @@ class CandleChart(ttk.Frame):
         from pt_chart_patterns import PatternLayer
 
         self.pattern_layer = PatternLayer(self, status_label=self.patterns_status_label)
+
+    def destroy(self) -> None:
+        """In the hub the status line is a child of the tab row, not of the chart:
+        it goes with the chart, or it would stay in the row, its pattern label
+        calling into a destroyed chart."""
+        frame = getattr(self, "status_frame", None)
+        if frame is not None and frame.master is not self:
+            try:
+                frame.destroy()
+            except tk.TclError:
+                pass
+        super().destroy()
 
     def set_timeframe(self, tf: str) -> None:
         """Show ``tf``, chosen in the hub's Timeframe box. Rapid changes are debounced
@@ -2325,7 +2333,7 @@ class PowerTraderHub(tk.Tk):
     def _apply_forced_dark_mode(self) -> None:
         """Apply the hub's one ttk theme from the active palette: dark, or blue in
         paper mode. ui_theme builds every style from ui_tokens."""
-        palette = get_palette(bool(getattr(self, "_paper_mode", False)))
+        palette = ui_tokens.palette(bool(getattr(self, "_paper_mode", False)))
         try:
             ui_theme.apply_theme(self, ttk.Style(self), palette)
         except tk.TclError:
@@ -2337,7 +2345,7 @@ class PowerTraderHub(tk.Tk):
         """Pack the PAPER TRADING banner across the top of the window."""
         if self._paper_banner is not None:
             return
-        palette = get_palette(True)
+        palette = ui_tokens.palette(True)
         self._paper_banner = PaperBanner(
             self,
             palette=palette,
@@ -2361,7 +2369,7 @@ class PowerTraderHub(tk.Tk):
         frame = getattr(self, "trades_frame", None)
         if frame is None or self._paper_section_label is not None:
             return
-        label = attach_trading_section_label(frame, get_palette(True))
+        label = attach_trading_section_label(frame, ui_tokens.palette(True))
         pack_at_top(label, frame)
         self._paper_section_label = label
 
@@ -2547,12 +2555,13 @@ class PowerTraderHub(tk.Tk):
     # ---- menu / layout ----
 
     def _build_menu(self) -> None:
+        p = ui_theme.active_palette()
         menubar = tk.Menu(
             self,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
+            bg=p["BG2"],
+            fg=p["FG"],
+            activebackground=p["SELECT_BG"],
+            activeforeground=p["SELECT_FG"],
             bd=0,
             relief="flat",
         )
@@ -2560,10 +2569,10 @@ class PowerTraderHub(tk.Tk):
         m_file = tk.Menu(
             menubar,
             tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
+            bg=p["BG2"],
+            fg=p["FG"],
+            activebackground=p["SELECT_BG"],
+            activeforeground=p["SELECT_FG"],
         )
         # Trading mode (owner spec: File menu so users don't need the CLI).
         # Paper is the default; Live needs a broker and an explicit confirmation.
@@ -2577,10 +2586,10 @@ class PowerTraderHub(tk.Tk):
         m_settings = tk.Menu(
             menubar,
             tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
+            bg=p["BG2"],
+            fg=p["FG"],
+            activebackground=p["SELECT_BG"],
+            activeforeground=p["SELECT_FG"],
         )
         m_settings.add_command(label="Settings...", command=self.open_settings_dialog)
         m_settings.add_command(
@@ -2592,10 +2601,10 @@ class PowerTraderHub(tk.Tk):
         m_help = tk.Menu(
             menubar,
             tearoff=0,
-            bg=DARK_BG2,
-            fg=DARK_FG,
-            activebackground=DARK_SELECT_BG,
-            activeforeground=DARK_SELECT_FG,
+            bg=p["BG2"],
+            fg=p["FG"],
+            activebackground=p["SELECT_BG"],
+            activeforeground=p["SELECT_FG"],
         )
         m_help.add_command(
             label="Dependency Status", command=self.show_dependency_status
@@ -2607,6 +2616,7 @@ class PowerTraderHub(tk.Tk):
         self.config(menu=menubar)
 
     def _build_layout(self) -> None:
+        p = ui_theme.active_palette()
         outer = ttk.Panedwindow(self, orient="horizontal")
         outer.pack(fill="both", expand=True)
 
@@ -2761,13 +2771,13 @@ class PowerTraderHub(tk.Tk):
             trader_row,
             text="Trader:",
             font=ui_tokens.font("caption"),
-            foreground=DARK_MUTED,
+            foreground=p["MUTED"],
         ).pack(side="left")
         self.lbl_trader = ttk.Label(
             trader_row,
             text="stopped",
             font=ui_tokens.font("caption"),
-            foreground=DARK_ACCENT2,
+            foreground=p["ACCENT2"],
         )
         self.lbl_trader.pack(side="left", padx=(2, 12))
 
@@ -2776,7 +2786,7 @@ class PowerTraderHub(tk.Tk):
             trader_row,
             text="Exchange: Checking...",
             font=ui_tokens.font("caption"),
-            foreground=DARK_ACCENT2,
+            foreground=p["ACCENT2"],
             cursor="hand2",
         )
         self.lbl_exchange.pack(side="left")
@@ -2786,7 +2796,7 @@ class PowerTraderHub(tk.Tk):
                 acct_box,
                 text=key,
                 font=ui_tokens.font("caption"),
-                foreground=DARK_MUTED,
+                foreground=p["MUTED"],
             ).grid(row=row, column=col, sticky="w", padx=(4, 6))
             value = ttk.Label(acct_box, text="N/A", font=ui_tokens.font("caption"))
             value.grid(row=row, column=col + 1, sticky="w", padx=(0, 8))
@@ -2814,14 +2824,14 @@ class PowerTraderHub(tk.Tk):
             training_title_row,
             text="Training:",
             font=ui_tokens.font("caption"),
-            foreground=DARK_MUTED,
+            foreground=p["MUTED"],
         ).pack(side="left")
         total_coins = len(self.coins) if self.coins else 0
         self.training_status_label = ttk.Label(
             training_title_row,
             text=f"0/{total_coins} running",
             font=ui_tokens.font("caption"),
-            foreground=DARK_ACCENT2,
+            foreground=p["ACCENT2"],
         )
         self.training_status_label.pack(side="left", padx=(2, 4))
         # Note: TTK buttons don't support 'height' parameter, so we only use 'width'
@@ -2863,14 +2873,14 @@ class PowerTraderHub(tk.Tk):
             training_title_row,
             text="stopped",
             font=ui_tokens.font("caption"),
-            foreground=DARK_ACCENT2,
+            foreground=p["ACCENT2"],
         )
         self.lbl_neural.pack(side="right", padx=(2, 4))
         ttk.Label(
             training_title_row,
             text="Thinking:",
             font=ui_tokens.font("caption"),
-            foreground=DARK_MUTED,
+            foreground=p["MUTED"],
         ).pack(side="right")
 
         # Keep train_coin_var for click handlers but remove dropdown UI
@@ -2947,13 +2957,13 @@ class PowerTraderHub(tk.Tk):
             height=8,
             wrap="none",
             font=self._live_log_font,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-            selectbackground=DARK_SELECT_BG,
-            selectforeground=DARK_SELECT_FG,
-            highlightbackground=DARK_BORDER,
-            highlightcolor=DARK_ACCENT,
+            bg=p["PANEL"],
+            fg=p["FG"],
+            insertbackground=p["FG"],
+            selectbackground=p["SELECT_BG"],
+            selectforeground=p["SELECT_FG"],
+            highlightbackground=p["BORDER"],
+            highlightcolor=p["ACCENT"],
         )
 
         trainer_scroll = ttk.Scrollbar(
@@ -2971,13 +2981,13 @@ class PowerTraderHub(tk.Tk):
             height=8,
             wrap="none",
             font=self._live_log_font,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-            selectbackground=DARK_SELECT_BG,
-            selectforeground=DARK_SELECT_FG,
-            highlightbackground=DARK_BORDER,
-            highlightcolor=DARK_ACCENT,
+            bg=p["PANEL"],
+            fg=p["FG"],
+            insertbackground=p["FG"],
+            selectbackground=p["SELECT_BG"],
+            selectforeground=p["SELECT_FG"],
+            highlightbackground=p["BORDER"],
+            highlightcolor=p["ACCENT"],
         )
 
         runner_scroll = ttk.Scrollbar(
@@ -2995,13 +3005,13 @@ class PowerTraderHub(tk.Tk):
             height=8,
             wrap="none",
             font=self._live_log_font,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
-            insertbackground=DARK_FG,
-            selectbackground=DARK_SELECT_BG,
-            selectforeground=DARK_SELECT_FG,
-            highlightbackground=DARK_BORDER,
-            highlightcolor=DARK_ACCENT,
+            bg=p["PANEL"],
+            fg=p["FG"],
+            insertbackground=p["FG"],
+            selectbackground=p["SELECT_BG"],
+            selectforeground=p["SELECT_FG"],
+            highlightbackground=p["BORDER"],
+            highlightcolor=p["ACCENT"],
         )
 
         trader_scroll = ttk.Scrollbar(
@@ -3020,9 +3030,9 @@ class PowerTraderHub(tk.Tk):
             log_text.tag_configure("log_long", foreground=STATUS_GREEN)
             log_text.tag_configure("log_short", foreground=LOG_SHORT)
             log_text.tag_configure(
-                "log_state", foreground=DARK_ACCENT2, font=self._live_log_bold
+                "log_state", foreground=p["ACCENT2"], font=self._live_log_bold
             )
-            log_text.tag_configure("log_dim", foreground=DARK_MUTED)
+            log_text.tag_configure("log_dim", foreground=p["MUTED"])
             log_text.tag_raise("sel")
         # Add left panes to vertical PanedWindow (enables drag sash between Controls and Live Output)
         left_split.add(top_controls, weight=0)
@@ -3180,7 +3190,9 @@ class PowerTraderHub(tk.Tk):
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
+        self.chart_tabs_bar.add(
+            acct_btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP)
+        )
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -3202,7 +3214,9 @@ class PowerTraderHub(tk.Tk):
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
+            self.chart_tabs_bar.add(
+                btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP)
+            )
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
@@ -3431,10 +3445,10 @@ class PowerTraderHub(tk.Tk):
         self.hist_list = tk.Listbox(
             hist_wrap,
             height=10,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
-            selectbackground=DARK_ACCENT2,
-            selectforeground=DARK_FG,
+            bg=p["PANEL"],
+            fg=p["FG"],
+            selectbackground=p["SELECT_BG"],
+            selectforeground=p["SELECT_FG"],
             font=ui_tokens.mono("small"),
         )
 
@@ -3748,6 +3762,7 @@ class PowerTraderHub(tk.Tk):
 
     def _create_order_management_tab(self):
         """Create the Order Management tab with order creation forms and monitoring."""
+        p = ui_theme.active_palette()
         try:
             # Initialize order manager
             self.order_manager = get_global_order_manager()
@@ -3920,9 +3935,9 @@ class PowerTraderHub(tk.Tk):
                 notif_text_frame,
                 height=4,
                 wrap="word",
-                bg=DARK_BG2,
-                fg=DARK_FG,
-                insertbackground=DARK_FG,
+                bg=p["BG2"],
+                fg=p["FG"],
+                insertbackground=p["FG"],
             )
             notif_scroll = ttk.Scrollbar(
                 notif_text_frame,
@@ -4725,6 +4740,7 @@ class PowerTraderHub(tk.Tk):
 
     def show_dependency_status(self):
         """Show comprehensive dependency status window."""
+        p = ui_theme.active_palette()
         try:
             if not DEPENDENCY_CHECKER_AVAILABLE:
                 messagebox.showinfo(
@@ -4739,7 +4755,7 @@ class PowerTraderHub(tk.Tk):
             status_window = tk.Toplevel(self)
             status_window.title("PowerTrader - Dependency Status")
             status_window.geometry("800x600")
-            status_window.configure(bg=DARK_BG)
+            status_window.configure(bg=p["BG"])
 
             # Create notebook for different views
             notebook = ttk.Notebook(status_window)
@@ -4766,6 +4782,7 @@ class PowerTraderHub(tk.Tk):
 
     def _create_dependency_overview_tab(self, notebook, results):
         """Create overview tab for dependency status."""
+        p = ui_theme.active_palette()
         overview_frame = ttk.Frame(notebook)
         notebook.add(overview_frame, text="Overview")
 
@@ -4800,8 +4817,8 @@ class PowerTraderHub(tk.Tk):
         status_text = tk.Text(
             status_frame,
             height=15,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
+            bg=p["PANEL"],
+            fg=p["FG"],
             font=ui_tokens.mono("body"),
         )
         status_scrollbar = ttk.Scrollbar(
@@ -4896,6 +4913,7 @@ class PowerTraderHub(tk.Tk):
 
     def _create_install_instructions_tab(self, notebook):
         """Create install instructions tab."""
+        p = ui_theme.active_palette()
         install_frame = ttk.Frame(notebook)
         notebook.add(install_frame, text="Install Instructions")
 
@@ -4916,8 +4934,8 @@ class PowerTraderHub(tk.Tk):
         script_text = tk.Text(
             script_frame,
             height=15,
-            bg=DARK_PANEL,
-            fg=DARK_FG,
+            bg=p["PANEL"],
+            fg=p["FG"],
             font=ui_tokens.mono("small"),
             wrap=tk.WORD,
         )
@@ -5679,25 +5697,23 @@ Platform: {sys.platform}
     def _build_training_table(self) -> None:
         """One cell per coin: status dot, symbol and trained-for. Clicking a cell
         trains the coin, or stops it while it trains (both ask first)."""
+        p = ui_theme.active_palette()
         frame = self.training_status_frame
         for widget in frame.winfo_children():
             widget.destroy()
-        try:
-            bg = ttk.Style().lookup("TFrame", "background") or DARK_BG
-        except Exception:
-            bg = DARK_BG
+        bg = p["BG"]  # the frames' colour
         self._training_cells = {}
         self._training_cell_state: Dict[str, Tuple[str, str, str]] = {}
         for coin in self.coins or []:
             cell = tk.Frame(frame, bg=bg, cursor="hand2")
             tight = {"bg": bg, "bd": 0, "padx": 0, "pady": 0}
             dot = tk.Label(
-                cell, text="●", fg=STATUS_IDLE, font=ui_tokens.font("small"), **tight
+                cell, text="●", fg=p["MUTED"], font=ui_tokens.font("small"), **tight
             )
             sym = tk.Label(
                 cell,
                 text=coin,
-                fg=DARK_FG,
+                fg=p["FG"],
                 font=ui_tokens.font("caption", "bold"),
                 width=5,
                 anchor="w",
@@ -5706,7 +5722,7 @@ Platform: {sys.platform}
             age = tk.Label(
                 cell,
                 text="",
-                fg=DARK_MUTED,
+                fg=p["MUTED"],
                 font=ui_tokens.font("micro"),
                 width=7,
                 anchor="w",
@@ -5715,7 +5731,7 @@ Platform: {sys.platform}
             sig = tk.Label(
                 cell,
                 text="–",
-                fg=DARK_MUTED,
+                fg=p["MUTED"],
                 font=ui_tokens.font("micro", "bold"),
                 width=6,
                 anchor="w",
@@ -5816,11 +5832,12 @@ Platform: {sys.platform}
 
     def _get_status_border_color(self, status: str, coin: str = None) -> str:
         """Status colour of a coin: trained green, training amber, untrained grey."""
+        p = ui_theme.active_palette()
         if status in ("✅", "✓"):  # _training_status_map marks trained coins ✅
             return STATUS_GREEN
         if status in ("●", "○"):
             return STATUS_AMBER
-        return STATUS_IDLE
+        return p["MUTED"]
 
     def _is_recently_trained(self, coin: str, hours_threshold: float = 2.0) -> bool:
         """Check if coin was trained within the threshold hours"""
@@ -7105,21 +7122,22 @@ Platform: {sys.platform}
         (long >= the trade start level and no short), orange while short, dimmed
         when the runner has not rewritten it for 15 minutes; "–" when there is no
         signal file. Only touches the label when the text or colour changes."""
+        p = ui_theme.active_palette()
         info = getattr(self, "_training_signal_info", None)
         if info is not None:
             info[coin] = (longs, shorts, mtime, level)
         if longs is None:
-            state = ("–", DARK_MUTED)
+            state = ("–", p["MUTED"])
         else:
             text = f"L{int(longs)} S{int(shorts or 0)}"
             if mtime is not None and time.time() - float(mtime) > 15 * 60:
-                colour = DARK_MUTED
+                colour = p["MUTED"]
             elif shorts:
                 colour = LOG_SHORT
             elif longs >= level:
                 colour = STATUS_GREEN
             else:
-                colour = DARK_FG
+                colour = p["FG"]
             state = (text, colour)
         cache = getattr(self, "_training_signal_state", None)
         if cache is None:
@@ -7146,7 +7164,7 @@ Platform: {sys.platform}
             style="ChartCog.TButton",
             command=self.open_chart_settings,
         )
-        cog.pack(side="right", anchor="n", pady=(0, SPACE["xs"]))
+        cog.pack(side="right", anchor="n", pady=(0, TAB_BUTTON_GAP))
         ToolTip(cog, "Chart settings")
         self.chart_settings_button = cog
         box = ttk.Frame(row)
@@ -7162,42 +7180,23 @@ Platform: {sys.platform}
         self._chart_tf_box, self.chart_tf_combo = box, combo
         self._pack_chart_tf_box()  # packed first, so the buttons get what is left
         # The buttons, then the selected chart's status line straight after them
-        # (owner, 2026-10-14). The buttons are only as wide as their content or what
-        # the status, the Timeframe box and the cog leave, so they scroll first.
-        self.chart_tabs_bar = ScrollingRow(row)
-        self.chart_tabs_bar.pack(side="left", anchor="n")
-        self._chart_status_slot = ttk.Frame(row)
-        self._chart_status_slot.pack(
-            side="left",
-            anchor="n",
+        # (owner, 2026-10-14), in a strip only as wide as both. With less room the
+        # buttons' column narrows first (it has the weight), down to
+        # MIN_TAB_BUTTONS_W, and they scroll; the status line keeps its width.
+        strip = ttk.Frame(row)
+        strip.pack(side="left", anchor="n")
+        strip.columnconfigure(0, weight=1, minsize=MIN_TAB_BUTTONS_W)
+        self._chart_tabs_strip = strip
+        self.chart_tabs_bar = ScrollingRow(strip)
+        self.chart_tabs_bar.grid(row=0, column=0, sticky="new")
+        self._chart_status_slot = ttk.Frame(strip)
+        self._chart_status_slot.grid(
+            row=0,
+            column=1,
+            sticky="nw",
             padx=(SPACE["sm"], 0),
-            pady=(STATUS_TEXT_DROP, SPACE["xs"]),
+            pady=(STATUS_TEXT_DROP, TAB_BUTTON_GAP),
         )
-        for widget in (row, self._chart_status_slot, self.chart_tabs_bar.inner):
-            widget.bind("<Configure>", self._fit_chart_tab_row, add="+")
-
-    def _fit_chart_tab_row(self, event=None) -> None:
-        """Give the buttons what the row has left after the status line, the
-        Timeframe box and the cog, up to their full width; short of that they
-        scroll."""
-        row = getattr(self, "_chart_tabs_row", None)
-        bar = getattr(self, "chart_tabs_bar", None)
-        if row is None or bar is None:
-            return
-        try:
-            avail = int(row.winfo_width())
-            if avail <= 1:
-                return
-            used = 0
-            for widget in row.pack_slaves():
-                if widget is bar:
-                    continue
-                padx = widget.pack_info().get("padx", 0)
-                pads = sum(padx) if isinstance(padx, tuple) else 2 * int(padx)
-                used += int(widget.winfo_reqwidth()) + pads
-            bar.set_width(max(60, min(bar.inner.winfo_reqwidth(), avail - used)))
-        except Exception:
-            pass
 
     def _show_chart_status(self, name: str) -> None:
         """The selected coin chart's status line, in the tab row. The account chart
@@ -7216,25 +7215,27 @@ Platform: {sys.platform}
                     frame.pack_forget()
             except Exception:
                 pass
-        self._fit_chart_tab_row()
 
     def _moved_status_row_px(self) -> int:
-        """Height the coin charts' status row used to take above the plot (a label
-        and 6 px above and below it), plus the 2 px less gap under the buttons."""
+        """How much higher the plot starts than when each coin chart had a status
+        row above it: that row (a label with CHART_STATUS_ROW_PADY above and below),
+        plus what the gap under the tab buttons shrank by. The divider under the
+        charts moves up as much, so the chart keeps its height."""
         try:
             label = next(iter(self.charts.values())).neural_status_label
-            return int(label.winfo_reqheight()) + 2 * 6 + 2
-        except Exception:
+        except (AttributeError, StopIteration):
             return 0
+        row = int(label.winfo_reqheight()) + 2 * CHART_STATUS_ROW_PADY
+        return row + FORMER_TAB_BUTTON_GAP - TAB_BUTTON_GAP
 
     def _pack_chart_tf_box(self) -> None:
-        bar = getattr(self, "chart_tabs_bar", None)
-        before = {"before": bar} if bar is not None and bar.winfo_exists() else {}
+        strip = getattr(self, "_chart_tabs_strip", None)
+        before = {"before": strip} if strip is not None and strip.winfo_exists() else {}
         self._chart_tf_box.pack(
             side="right",
             anchor="n",
             padx=(SPACE["md"], SPACE["sm"]),
-            pady=(SPACE["sm"], SPACE["xs"]),
+            pady=(SPACE["sm"], TAB_BUTTON_GAP),
             **before,
         )  # level with the buttons, also while the scrollbar shows
 
@@ -7347,7 +7348,9 @@ Platform: {sys.platform}
             style="ChartTab.TButton",
             command=lambda: self._show_chart_page("ACCOUNT"),
         )
-        self.chart_tabs_bar.add(acct_btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
+        self.chart_tabs_bar.add(
+            acct_btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP)
+        )
         self._chart_tab_buttons["ACCOUNT"] = acct_btn
 
         self.account_chart = AccountValueChart(
@@ -7369,7 +7372,9 @@ Platform: {sys.platform}
                 style="ChartTab.TButton",
                 command=lambda c=coin: self._show_chart_page(c),
             )
-            self.chart_tabs_bar.add(btn, padx=(0, SPACE["sm"]), pady=(0, SPACE["xs"]))
+            self.chart_tabs_bar.add(
+                btn, padx=(0, SPACE["sm"]), pady=(0, TAB_BUTTON_GAP)
+            )
             self._chart_tab_buttons[coin] = btn
 
             chart = CandleChart(
@@ -7437,7 +7442,7 @@ Platform: {sys.platform}
                 hub_dir=self.hub_dir,
                 trader_running=self._paper_trader_running_reason,
                 known_coins=getattr(self, "coins", ()) or (),
-                palette=get_palette(paper_mode),
+                palette=ui_tokens.palette(paper_mode),
                 live=not paper_mode,
                 on_saved=self._refresh_trader_status,
             )
@@ -7454,6 +7459,7 @@ Platform: {sys.platform}
     def open_chart_settings(self, parent=None):
         """Open (or raise) the Chart settings pop-out: a toggle for every chart overlay
         and candlestick pattern. Each change is saved and redrawn at once."""
+        p = ui_theme.active_palette()
         from pt_chart_patterns import ChartSettingsWindow
 
         win = getattr(self, "_chart_settings_win", None)
@@ -7468,7 +7474,7 @@ Platform: {sys.platform}
         win = ChartSettingsWindow(
             parent or self, self.settings.get("chart"), self._apply_chart_settings
         )
-        win.configure(bg=DARK_BG)
+        win.configure(bg=p["BG"])
         self._chart_settings_win = win
         return win
 
@@ -7488,12 +7494,13 @@ Platform: {sys.platform}
             pass
 
     def open_settings_dialog(self) -> None:
+        p = ui_theme.active_palette()
         win = tk.Toplevel(self)
         win.title("Settings")
         # Big enough for the bottom buttons on most screens + still scrolls if someone resizes smaller.
         win.geometry("860x680")
         win.minsize(760, 560)
-        win.configure(bg=DARK_BG)
+        win.configure(bg=p["BG"])
 
         # Scrollable settings content (auto-hides the scrollbar if everything fits),
         # using the same pattern as the Neural Levels scrollbar.
@@ -7504,9 +7511,9 @@ Platform: {sys.platform}
 
         settings_canvas = tk.Canvas(
             viewport,
-            bg=DARK_BG,
+            bg=p["BG"],
             highlightthickness=1,
-            highlightbackground=DARK_BORDER,
+            highlightbackground=p["BORDER"],
             bd=0,
         )
         settings_canvas.grid(row=0, column=0, sticky="nsew")

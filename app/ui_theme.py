@@ -27,6 +27,12 @@ Classic Tk widgets (tk.Frame, tk.Label, tk.Entry ...) read their colours from
 the option database when created; install_classic_defaults() fills it, so they
 match the ttk widgets without colours of their own. theme_figure() gives a
 matplotlib figure the chart surfaces from ui_tokens.CHART.
+
+A feature window run on its own builds its root with themed_root(), so it looks
+as it does inside the hub.
+
+Fonts: ui_tokens.font() names a Tk named font, which install_fonts() (run by
+apply_theme) creates in each Tk interpreter in the system UI family.
 """
 
 import tkinter as tk
@@ -45,16 +51,32 @@ def active_palette() -> Dict[str, str]:
     return _active
 
 
-def _use_system_family(root: tk.Misc) -> None:
-    """Point the type scale at the system UI family (Segoe UI on Windows), the one
-    widgets without an explicit font already use. A tuple naming "TkDefaultFont"
-    is not a family, and Tk falls back to Arial for it."""
+def install_fonts(root: tk.Misc) -> None:
+    """Create, or update, the type scale's named fonts (ui_tokens.font) in root's
+    Tk interpreter, in the system UI family: the family of Tk's own default font,
+    which widgets without a font of their own use (Segoe UI on Windows)."""
     try:
-        ui_tokens.FAMILY = tkfont.nametofont("TkDefaultFont", root=root).actual(
-            "family"
-        )
-    except Exception:
-        pass
+        family = tkfont.nametofont("TkDefaultFont", root=root).actual("family")
+        existing = set(root.tk.splitlist(root.tk.call("font", "names")))
+    except tk.TclError:
+        return
+    combos = [()] + [(s,) for s in ui_tokens.FONT_STYLES] + [ui_tokens.FONT_STYLES]
+    for role, size in ui_tokens.FONT_SIZES.items():
+        for styles in combos:
+            name = ui_tokens.font(role, *styles)
+            root.tk.call(
+                "font",
+                "configure" if name in existing else "create",
+                name,
+                "-family",
+                family,
+                "-size",
+                size,
+                "-weight",
+                "bold" if "bold" in styles else "normal",
+                "-slant",
+                "italic" if "italic" in styles else "roman",
+            )
 
 
 def install_classic_defaults(root: tk.Misc, p: Dict[str, str]) -> None:
@@ -122,11 +144,21 @@ def install_classic_defaults(root: tk.Misc, p: Dict[str, str]) -> None:
         pass
 
 
+def themed_root() -> tk.Tk:
+    """The root window for a feature window run on its own (python x_gui.py),
+    themed like the hub's dark mode. A bare tk.Tk() has no option database, so
+    classic widgets keep Tk's white and black, and the named label styles fall
+    back to plain labels."""
+    root = tk.Tk()
+    apply_theme(root, ttk.Style(root), ui_tokens.DARK)
+    return root
+
+
 def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
     """Style every widget the hub uses from palette ``p``."""
     global _active
     _active = p
-    _use_system_family(root)
+    install_fonts(root)
     try:
         root.configure(bg=p["BG"])
     except tk.TclError:
@@ -147,6 +179,14 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         troughcolor=p["BG"],
         selectbackground=p["SELECT_BG"],
         selectforeground=p["SELECT_FG"],
+        # the dotted keyboard-focus ring of check boxes, radio buttons and notebook
+        # tabs; ttk's default is black, which can't be seen on these backgrounds
+        focuscolor=p["ACCENT"],
+        # clam draws a second line inside each border, light at the top left and
+        # dark at the bottom right (its #EEEBE7 / #CFCDC8 greys). Here both are the
+        # text colour: the light outline round buttons, fields, tabs and scrollbars.
+        lightcolor=p["FG"],
+        darkcolor=p["FG"],
     )
     # clam's own state colours are light greys (#EEEBE7 on hover, #DCDAD5 when
     # disabled); every style without a map of its own inherits these instead.
@@ -156,7 +196,13 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         foreground=[("disabled", p["MUTED"])],
         selectbackground=[("!focus", p["SELECT_BG"])],
         selectforeground=[("!focus", p["SELECT_FG"])],
+        lightcolor=[("disabled", p["MUTED"])],
+        darkcolor=[("disabled", p["MUTED"])],
     )
+    # the inner outline dims when pressed or disabled, and fields light it on focus
+    # (clam: #BAB5AB pressed, #6F9DC6 on a focused entry)
+    pressed_outline = [("disabled", p["MUTED"]), ("pressed", p["MUTED"])]
+    field_outline = [("disabled", p["MUTED"]), ("focus", p["ACCENT2"])]
     for name in ("TFrame", "TLabel", "TCheckbutton", "TRadiobutton"):
         style.configure(name, background=p["BG"], foreground=p["FG"])
 
@@ -185,11 +231,13 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
     style.configure("Muted.TLabel", foreground=p["MUTED"])
     for name, key in (("Good", "good"), ("Warn", "warn"), ("Bad", "bad")):
         style.configure(f"{name}.TLabel", foreground=ui_tokens.STATUS[key])
-    style.configure(
+    style.configure(  # both lines of the outline in the frame colour
         "TLabelframe",
         background=p["BG"],
         foreground=p["FG"],
         bordercolor=p["FRAME_BORDER"],
+        lightcolor=p["FRAME_BORDER"],
+        darkcolor=p["FRAME_BORDER"],
     )
     style.configure("TLabelframe.Label", background=p["BG"], foreground=p["ACCENT"])
     style.configure("TSeparator", background=p["BORDER"])
@@ -204,30 +252,38 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         focuscolor=p["ACCENT"],
         padding=(3, 2),
     )
-    style.map(
+    style.map(  # the first matching state wins, and a pressed button is also active
         "TButton",
         background=[
-            ("active", p["PANEL2"]),
             ("pressed", p["PANEL"]),
+            ("active", p["PANEL2"]),
             ("disabled", p["BG2"]),
         ],
         foreground=[("active", p["ACCENT"]), ("disabled", p["MUTED"])],
         bordercolor=[("active", p["ACCENT2"]), ("focus", p["ACCENT"])],
+        lightcolor=pressed_outline,
+        darkcolor=pressed_outline,
     )
-    # The one main action in a panel: filled with the accent
+    # The one main action in a panel: filled with the accent, edge to edge
+    fill = [
+        ("disabled", p["BG2"]),
+        ("pressed", p["ACCENT2"]),
+        ("active", p["ACCENT2"]),
+    ]
     style.configure(
         "Accent.TButton",
         background=p["ACCENT"],
         foreground=p["BG"],
         bordercolor=p["ACCENT"],
+        lightcolor=p["ACCENT"],
+        darkcolor=p["ACCENT"],
+        focuscolor=p["BG"],  # an accent ring would vanish on the accent fill
     )
     style.map(
         "Accent.TButton",
-        background=[
-            ("disabled", p["BG2"]),
-            ("pressed", p["ACCENT2"]),
-            ("active", p["ACCENT2"]),
-        ],
+        background=fill,
+        lightcolor=fill,
+        darkcolor=fill,
         foreground=[("disabled", p["MUTED"]), ("!disabled", p["BG"])],
         bordercolor=[("focus", p["FG"]), ("active", p["ACCENT2"])],
     )
@@ -246,6 +302,8 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         background=[("disabled", p["BG2"]), ("readonly", p["PANEL"])],
         bordercolor=[("focus", p["ACCENT2"])],
         foreground=[("disabled", p["MUTED"])],
+        lightcolor=field_outline,
+        darkcolor=field_outline,
     )
     for name in ("TCombobox", "TSpinbox"):
         style.configure(
@@ -268,6 +326,8 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
             background=[("disabled", p["BG2"]), ("readonly", p["PANEL"])],
             bordercolor=[("focus", p["ACCENT2"])],
             arrowcolor=[("disabled", p["MUTED"])],
+            lightcolor=field_outline,
+            darkcolor=field_outline,
         )
 
     # Notebooks
@@ -275,10 +335,12 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
     style.configure(
         "TNotebook.Tab", background=p["BG2"], foreground=p["FG"], padding=(10, 6)
     )
-    style.map(
+    style.map(  # clam maps the tabs' outline in every state, so this replaces it
         "TNotebook.Tab",
         background=[("selected", p["PANEL"]), ("active", p["PANEL2"])],
         foreground=[("selected", p["ACCENT"]), ("active", p["ACCENT2"])],
+        lightcolor=[("disabled", p["MUTED"]), ("", p["FG"])],
+        darkcolor=[("disabled", p["MUTED"]), ("", p["FG"])],
     )
     # A notebook with no tab strip (the chart pages draw their own tab row)
     style.configure("HiddenTabs.TNotebook", tabmargins=0)
@@ -308,7 +370,7 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
     )
     style.map(
         "ChartTab.TButton",
-        background=[("active", p["PANEL2"]), ("pressed", p["PANEL"])],
+        background=[("pressed", p["PANEL"]), ("active", p["PANEL2"])],
         foreground=[("active", p["ACCENT2"])],
         bordercolor=[("active", p["ACCENT2"]), ("focus", p["ACCENT"])],
     )
@@ -369,6 +431,16 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
         foreground=[("active", p["ACCENT2"])],
     )
 
+    # Progress bars: an accent bar (it took the frame colour, unseen on its trough)
+    style.configure(
+        "Horizontal.TProgressbar",
+        background=p["ACCENT"],
+        troughcolor=p["BG2"],
+        bordercolor=p["BORDER"],
+        lightcolor=p["ACCENT"],
+        darkcolor=p["ACCENT"],
+    )
+
     # Panes and scrollbars
     style.configure("TPanedwindow", background=p["BG"])
     for name in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
@@ -384,26 +456,28 @@ def apply_theme(root: tk.Misc, style: ttk.Style, p: Dict[str, str]) -> None:
 def theme_figure(fig) -> None:
     """Give a matplotlib figure the chart surfaces from ui_tokens.CHART: the same
     dark plot in both modes, light text, quiet spines. Call it after the axes are
-    drawn and before canvas.draw(). Text given its own colour keeps it."""
+    drawn and before canvas.draw(). Titles, axis labels, annotations and legend
+    text at matplotlib's default colour take the chart's text colour; text given a
+    colour of its own keeps it. Ticks and spines always take the chart colours."""
     from matplotlib.colors import to_hex
     from matplotlib import rcParams
 
     c = ui_tokens.CHART
-    default_text = to_hex(rcParams["text.color"])
+    defaults = {to_hex(rcParams["text.color"]), to_hex(rcParams["axes.labelcolor"])}
+    if rcParams["axes.titlecolor"] != "auto":
+        defaults.add(to_hex(rcParams["axes.titlecolor"]))
     fig.patch.set_facecolor(c["figure"])
     for ax in fig.axes:
         ax.set_facecolor(c["plot"])
         ax.tick_params(colors=c["text"])
-        for label in (ax.title, ax.xaxis.label, ax.yaxis.label):
-            label.set_color(c["text"])
-        for text in ax.texts:  # annotations and pie labels
-            if to_hex(text.get_color()) == default_text:
-                text.set_color(c["text"])
+        texts = [ax.title, ax.xaxis.label, ax.yaxis.label, *ax.texts]  # + pie labels
         for spine in ax.spines.values():
             spine.set_color(c["grid"])
         legend = ax.get_legend()
         if legend is not None:
             legend.get_frame().set_facecolor(c["label_bg"])
             legend.get_frame().set_edgecolor(c["grid"])
-            for text in legend.get_texts():
+            texts += legend.get_texts()
+        for text in texts:
+            if to_hex(text.get_color()) in defaults:
                 text.set_color(c["text"])
