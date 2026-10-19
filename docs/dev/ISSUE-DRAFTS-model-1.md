@@ -98,7 +98,7 @@ One candle always gives `len(history_list) == 1`, so the loop that starts at `:7
 **Callers**
 
 - Started by the hub: the neural runner (`app/pt_thinker.py:604`, `:720`, `:1030`, `:1410`). Before FDS-MDL the default trainer `app/pt_trainer.py` (`:132`, `:159`) also called it. Since FDS-MDL Phase 1 that trainer is a mock the hub launches only with `allow_mock_trainer`, and the default trainer (`app/pt_pattern_trainer.py`) reads `app/market_data/candles.py` instead.
-- Not started by anything: the per-coin `app/<SYM>/pt_trainer*.py` copies, `app/pt_trainer_standalone.py`, `app/pt_neural_processor.py`, `app/pt_hub_chart_components.py`, `app/demo_phase3_features.py`, `app/phase3_live_demo.py`.
+- Not started by anything: the per-coin `app/<SYM>/pt_trainer*.py` copies, `app/pt_trainer_standalone.py`, `app/pt_neural_processor.py`, `app/pt_hub_chart_components.py` (removed since, in PR #167), `app/demo_phase3_features.py`, `app/phase3_live_demo.py`.
 
 **History.** The single synthetic candle has been there since `2d7a0f2` (2026-02-22). The thinker has called `get_historical_data` since `b7f563a` (also 2026-02-22). `DataProvider` only gained that method in `4fc3834` (2026-03-06).
 

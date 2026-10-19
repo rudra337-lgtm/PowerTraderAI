@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+import ui_theme
+import ui_tokens
+
 try:
     from performance_attribution import (
         AttributionMethod,
@@ -46,7 +49,7 @@ class PerformanceAttributionGUI:
     def __init__(self, parent=None):
         """Initialize the Performance Attribution GUI."""
         if parent is None:
-            self.root = tk.Tk()
+            self.root = ui_theme.themed_root()
             self.root.title("Performance Attribution Analysis")
             self.root.geometry("1400x900")
         else:
@@ -85,26 +88,28 @@ class PerformanceAttributionGUI:
 
     def show_dependency_message(self):
         """Show message about missing dependencies."""
+        p = ui_theme.active_palette()
         msg_frame = tk.Frame(self.root)
         msg_frame.pack(fill=tk.BOTH, expand=True)
 
         tk.Label(
             msg_frame,
             text="Performance Attribution Engine - Enhanced Features Available",
-            font=("Arial", 16, "bold"),
+            font=ui_tokens.font("display", "bold"),
         ).pack(pady=20)
 
         tk.Label(
             msg_frame,
             text="For full attribution analysis capabilities, install optional dependencies:",
-            font=("Arial", 12),
+            font=ui_tokens.font("title"),
         ).pack(pady=10)
 
         tk.Label(
             msg_frame,
             text="python app/install_optional_deps.py",
-            font=("Courier", 10),
-            background="lightgray",
+            font=ui_tokens.mono("body"),
+            background=p["PANEL"],
+            foreground=p["FG"],
         ).pack(pady=5)
 
         features = [
@@ -119,11 +124,11 @@ class PerformanceAttributionGUI:
         tk.Label(
             msg_frame,
             text="Features available with enhanced dependencies:",
-            font=("Arial", 11, "bold"),
+            font=ui_tokens.font("subtitle", "bold"),
         ).pack(pady=(20, 5))
 
         for feature in features:
-            tk.Label(msg_frame, text=feature, font=("Arial", 10)).pack(
+            tk.Label(msg_frame, text=feature, font=ui_tokens.font("body")).pack(
                 anchor="w", padx=100
             )
 
@@ -603,7 +608,7 @@ class PerformanceAttributionGUI:
         report_display_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         self.report_text = tk.Text(
-            report_display_frame, wrap=tk.WORD, font=("Courier", 9)
+            report_display_frame, wrap=tk.WORD, font=ui_tokens.mono("small")
         )
         report_scrollbar = ttk.Scrollbar(
             report_display_frame, orient=tk.VERTICAL, command=self.report_text.yview
@@ -1082,8 +1087,22 @@ class PerformanceAttributionGUI:
         x = np.arange(len(sectors))
         width = 0.35
 
-        ax.bar(x - width / 2, allocations, width, label="Allocation Effect", alpha=0.8)
-        ax.bar(x + width / 2, selections, width, label="Selection Effect", alpha=0.8)
+        ax.bar(
+            x - width / 2,
+            allocations,
+            width,
+            color=ui_tokens.CHART["series"],
+            label="Allocation Effect",
+            alpha=0.8,
+        )
+        ax.bar(
+            x + width / 2,
+            selections,
+            width,
+            color=ui_tokens.CHART["series2"],
+            label="Selection Effect",
+            alpha=0.8,
+        )
 
         ax.set_xlabel("Sector")
         ax.set_ylabel("Attribution (%)")
@@ -1092,6 +1111,7 @@ class PerformanceAttributionGUI:
         ax.set_xticklabels(sectors, rotation=45)
         ax.legend()
         ax.grid(True, alpha=0.3)
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.sector_chart_frame)
         canvas.draw()
@@ -1119,7 +1139,9 @@ class PerformanceAttributionGUI:
         ]
         sectors = list(result.attribution_breakdown.keys())
 
-        scatter = ax.scatter(allocations, selections, alpha=0.7, s=100)
+        scatter = ax.scatter(
+            allocations, selections, alpha=0.7, s=100, color=ui_tokens.CHART["series"]
+        )
 
         for i, sector in enumerate(sectors):
             ax.annotate(
@@ -1130,12 +1152,13 @@ class PerformanceAttributionGUI:
                 fontsize=9,
             )
 
-        ax.axhline(y=0, color="k", linestyle="--", alpha=0.5)
-        ax.axvline(x=0, color="k", linestyle="--", alpha=0.5)
+        ax.axhline(y=0, color=ui_tokens.CHART["text"], linestyle="--", alpha=0.5)
+        ax.axvline(x=0, color=ui_tokens.CHART["text"], linestyle="--", alpha=0.5)
         ax.set_xlabel("Allocation Effect (%)")
         ax.set_ylabel("Selection Effect (%)")
         ax.set_title("Allocation vs Selection Effects")
         ax.grid(True, alpha=0.3)
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.sector_chart_frame)
         canvas.draw()
@@ -1156,7 +1179,10 @@ class PerformanceAttributionGUI:
         factors = list(result.attribution_breakdown.keys())
         contributions = [result.attribution_breakdown[f] * 100 for f in factors]
 
-        colors = ["red" if c < 0 else "green" for c in contributions]
+        colors = [
+            ui_tokens.STATUS["bad"] if c < 0 else ui_tokens.STATUS["good"]
+            for c in contributions
+        ]
 
         bars = ax.bar(factors, contributions, color=colors, alpha=0.7)
 
@@ -1164,7 +1190,8 @@ class PerformanceAttributionGUI:
         ax.set_title("Factor Attribution Analysis")
         ax.tick_params(axis="x", rotation=45)
         ax.grid(True, alpha=0.3)
-        ax.axhline(y=0, color="black", linewidth=0.8)
+        ax.axhline(y=0, color=ui_tokens.CHART["text"], linewidth=0.8)
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.factor_chart_frame)
         canvas.draw()
@@ -1185,12 +1212,15 @@ class PerformanceAttributionGUI:
             self.risk_attribution["percentage_contributions"][s] for s in securities
         ]
 
-        bars = ax.bar(securities, contributions, alpha=0.7)
+        bars = ax.bar(
+            securities, contributions, color=ui_tokens.CHART["series"], alpha=0.7
+        )
 
         ax.set_ylabel("Risk Contribution")
         ax.set_title("Risk Attribution by Security")
         ax.tick_params(axis="x", rotation=45)
         ax.grid(True, alpha=0.3)
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.risk_chart_frame)
         canvas.draw()
@@ -1241,7 +1271,7 @@ class PerformanceAttributionGUI:
 
 def main():
     """Run the Performance Attribution GUI."""
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     app = PerformanceAttributionGUI(root)
     root.mainloop()
 

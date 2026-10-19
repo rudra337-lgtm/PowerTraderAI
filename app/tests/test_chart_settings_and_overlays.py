@@ -20,6 +20,10 @@ if APP_DIR not in sys.path:
 
 import candlestick_patterns as cp  # noqa: E402
 import chart_settings as cs  # noqa: E402
+import ui_tokens  # noqa: E402
+from helpers_colour import contrast as _contrast  # noqa: E402
+from helpers_colour import linear as _lin  # noqa: E402
+from helpers_colour import rgb as _rgb  # noqa: E402
 from test_candlestick_patterns import NOT_ON_SCREEN  # noqa: E402
 from market_data import listing  # noqa: E402
 
@@ -202,15 +206,6 @@ MACHADO = {  # Machado, Oliveira and Fernandes (2009), severity 1.0, on linear R
 }
 
 
-def _rgb(h):
-    h = h.lstrip("#")
-    return tuple(int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
-
-
-def _lin(c):
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-
 def _gamma(c):
     c = min(1.0, max(0.0, c))
     return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
@@ -226,15 +221,6 @@ def _simulate(rgb, kind):
     lin = [_lin(c) for c in rgb]
     m = MACHADO[kind]
     return tuple(_gamma(sum(m[r][k] * lin[k] for k in range(3))) for r in range(3))
-
-
-def _contrast(a, b):
-    def lum(rgb):
-        r, g, bl = (_lin(c) for c in rgb)
-        return 0.2126 * r + 0.7152 * g + 0.0722 * bl
-
-    hi, lo = sorted((lum(a), lum(b)), reverse=True)
-    return (hi + 0.05) / (lo + 0.05)
 
 
 def _lab(rgb):
@@ -437,19 +423,23 @@ def refresh(chart):
     )
 
 
+LINES = ui_tokens.CHART_LINES
 OVERLAY_MARKS = {  # key -> (line colour, right-edge label prefix)
-    "neural_long": ("blue", None),
-    "neural_short": ("orange", None),
-    "ask": ("purple", "ASK"),
-    "bid": ("teal", "BID"),
-    "avg": ("yellow", "AVG"),
-    "dca": ("red", "DCA"),
-    "trail": ("green", "SELL"),
+    "neural_long": (LINES["neural_long"], None),
+    "neural_short": (LINES["neural_short"], None),
+    "ask": (LINES["ask"], "ASK"),
+    "bid": (LINES["bid"], "BID"),
+    "avg": (LINES["avg"], "AVG"),
+    "dca": (LINES["dca"], "DCA"),
+    "trail": (LINES["trail"], "SELL"),
 }
 
 
 def drawn(chart):
-    lines = {line.get_color() for line in chart.ax.lines}
+    # level lines are horizontal; candle wicks (one is the DCA line's red) are not
+    lines = {
+        line.get_color() for line in chart.ax.lines if len(set(line.get_ydata())) == 1
+    }
     texts = [t.get_text() for t in chart.ax.texts]
     out = {}
     for key, (colour, prefix) in OVERLAY_MARKS.items():
@@ -981,18 +971,19 @@ def test_ask_and_bid_lines_are_dotted_while_the_trader_is_stopped(make_chart):
             avg_cost_basis=99.5,
             trader_running=running,
         )
+        levels = {LINES[k]: k for k in ("ask", "bid", "avg", "dca", "trail")}
         return {
-            line.get_color(): line.get_linestyle()
+            levels[line.get_color()]: line.get_linestyle()
             for line in chart.ax.lines
-            if line.get_color() in ("purple", "teal", "yellow", "red", "green")
+            if line.get_color() in levels
             and len(set(line.get_ydata())) == 1  # the level lines, not candle wicks
         }
 
     stopped = styles(False)
-    assert stopped["purple"] == ":" and stopped["teal"] == ":"  # ASK, BID
-    assert all(stopped[c] == "-" for c in ("yellow", "red", "green"))  # AVG, DCA, SELL
+    assert stopped["ask"] == ":" and stopped["bid"] == ":"
+    assert all(stopped[k] == "-" for k in ("avg", "dca", "trail"))
     running = styles(True)
-    assert running["purple"] == "-" and running["teal"] == "-"
+    assert running["ask"] == "-" and running["bid"] == "-"
 
 
 def test_the_coin_chart_shows_no_last_update_time(make_chart):

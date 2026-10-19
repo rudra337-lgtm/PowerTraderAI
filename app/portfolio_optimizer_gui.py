@@ -13,6 +13,9 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+import ui_theme
+import ui_tokens
+
 try:
     from portfolio_optimizer import PortfolioOptimizer
 
@@ -38,7 +41,7 @@ class PortfolioOptimizerGUI:
     def __init__(self, parent=None):
         """Initialize the Portfolio Optimizer GUI."""
         if parent is None:
-            self.root = tk.Tk()
+            self.root = ui_theme.themed_root()
             self.root.title("Portfolio Optimization Engine")
             self.root.geometry("1200x800")
         else:
@@ -74,32 +77,34 @@ class PortfolioOptimizerGUI:
 
     def show_dependency_message(self):
         """Show message about missing dependencies."""
+        p = ui_theme.active_palette()
         msg_frame = tk.Frame(self.root)
         msg_frame.pack(fill=tk.BOTH, expand=True)
 
         tk.Label(
             msg_frame,
             text="Portfolio Optimization Engine - Enhanced Features Available",
-            font=("Arial", 16, "bold"),
+            font=ui_tokens.font("display", "bold"),
         ).pack(pady=20)
 
         tk.Label(
             msg_frame,
             text="For full portfolio optimization capabilities, install optional dependencies:",
-            font=("Arial", 12),
+            font=ui_tokens.font("title"),
         ).pack(pady=10)
 
         tk.Label(
             msg_frame,
             text="python app/install_optional_deps.py",
-            font=("Courier", 10),
-            background="lightgray",
+            font=ui_tokens.mono("body"),
+            background=p["PANEL"],
+            foreground=p["FG"],
         ).pack(pady=5)
 
         tk.Label(
             msg_frame,
             text="Features available with enhanced dependencies:",
-            font=("Arial", 11, "bold"),
+            font=ui_tokens.font("subtitle", "bold"),
         ).pack(pady=(20, 5))
 
         features = [
@@ -112,7 +117,7 @@ class PortfolioOptimizerGUI:
         ]
 
         for feature in features:
-            tk.Label(msg_frame, text=feature, font=("Arial", 10)).pack(
+            tk.Label(msg_frame, text=feature, font=ui_tokens.font("body")).pack(
                 anchor="w", padx=100
             )
 
@@ -198,7 +203,7 @@ class PortfolioOptimizerGUI:
         summary_frame.pack(fill=tk.X, padx=10, pady=10)
 
         self.data_summary_label = tk.Label(
-            summary_frame, text="No data loaded", font=("Arial", 10)
+            summary_frame, text="No data loaded", font=ui_tokens.font("body")
         )
         self.data_summary_label.pack(pady=5)
 
@@ -407,7 +412,7 @@ class PortfolioOptimizerGUI:
             tk.Label(
                 analysis_frame,
                 text="Install matplotlib and seaborn for visualization features",
-                font=("Arial", 12),
+                font=ui_tokens.font("title"),
             ).pack(pady=50)
             return
 
@@ -851,7 +856,8 @@ class PortfolioOptimizerGUI:
         ax.plot(
             self.frontier_data["Volatility"],
             self.frontier_data["Return"],
-            "b-",
+            "-",
+            color=ui_tokens.CHART["series"],
             linewidth=2,
             label="Efficient Frontier",
         )
@@ -861,7 +867,8 @@ class PortfolioOptimizerGUI:
         ax.plot(
             self.frontier_data.loc[max_sharpe_idx, "Volatility"],
             self.frontier_data.loc[max_sharpe_idx, "Return"],
-            "ro",
+            "o",
+            color=ui_tokens.CHART["text"],
             markersize=10,
             label="Max Sharpe Ratio",
         )
@@ -871,7 +878,8 @@ class PortfolioOptimizerGUI:
             ax.plot(
                 self.optimization_result["volatility"],
                 self.optimization_result["expected_return"],
-                "go",
+                "o",
+                color=ui_tokens.CHART["series2"],
                 markersize=10,
                 label="Current Optimization",
             )
@@ -881,6 +889,7 @@ class PortfolioOptimizerGUI:
         ax.set_title("Efficient Frontier")
         ax.legend()
         ax.grid(True, alpha=0.3)
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.chart_frame)
         canvas.draw()
@@ -910,12 +919,15 @@ class PortfolioOptimizerGUI:
         wedges, texts, autotexts = ax.pie(
             values, labels=assets, autopct="%1.1f%%", colors=colors, startangle=90
         )
+        for autotext in autotexts:  # dark on the pale wedges
+            autotext.set_color(ui_tokens.CHART["figure"])
 
         ax.set_title(
             f"Portfolio Composition\n"
             f'Expected Return: {self.optimization_result["expected_return"]:.2%}, '
             f'Volatility: {self.optimization_result["volatility"]:.2%}'
         )
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.chart_frame)
         canvas.draw()
@@ -947,7 +959,7 @@ class PortfolioOptimizerGUI:
             volatilities = np.sqrt(np.diag(cov_matrix))
 
         # Plot individual assets
-        ax.scatter(volatilities, returns, s=100, alpha=0.7, c="blue")
+        ax.scatter(volatilities, returns, s=100, alpha=0.7, c=ui_tokens.CHART["series"])
 
         # Add labels
         for i, asset in enumerate(returns.index):
@@ -964,7 +976,7 @@ class PortfolioOptimizerGUI:
                 self.optimization_result["volatility"],
                 self.optimization_result["expected_return"],
                 s=200,
-                c="red",
+                c=ui_tokens.CHART["series2"],
                 marker="*",
                 label="Optimized Portfolio",
             )
@@ -975,6 +987,7 @@ class PortfolioOptimizerGUI:
         ax.grid(True, alpha=0.3)
         if self.optimization_result:
             ax.legend()
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.chart_frame)
         canvas.draw()
@@ -983,7 +996,7 @@ class PortfolioOptimizerGUI:
 
 def main():
     """Run the Portfolio Optimizer GUI."""
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     app = PortfolioOptimizerGUI(root)
     root.mainloop()
 

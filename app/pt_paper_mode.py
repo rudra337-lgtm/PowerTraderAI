@@ -2,8 +2,9 @@
 Paper trading mode helpers for the PowerTrader hub.
 
 Provides:
-- Palette that paints the hub blue (instead of black) when paper mode is on,
-  so the user can instantly see they are not trading real money.
+- (The blue palette that paints the hub when paper mode is on, so the user can
+  instantly see they are not trading real money, is ui_tokens.PAPER; the hub
+  picks it with ui_tokens.palette(paper_mode) and ui_theme applies it.)
 - "PAPER TRADING" banner label that gets injected into the trading section.
 - A sample-trade runner that pulls a live BTC price from Binance's public
   ticker endpoint and routes a simulated BUY then SELL through
@@ -25,51 +26,15 @@ import tkinter as tk
 import urllib.error
 import urllib.request
 from decimal import Decimal
-from tkinter import ttk
 from typing import Any, Callable, Dict, Optional
 
+import ui_tokens
 from pt_paper_trading import OrderSide, OrderType, PaperTradingAccount
 from trading_mode import read_trading_settings
 
-# --- Palettes -----------------------------------------------------------------
 # Owner spec (PR #90 comment): "paper mode changes the CSS of the background.
-# Say BLUE instead of BLACK." Tk has no CSS, so we mirror the dark palette key
-# names and let the hub apply whichever one matches the current mode.
-
-DARK_PALETTE: Dict[str, str] = {
-    "BG": "#070B10",
-    "BG2": "#0B1220",
-    "PANEL": "#0E1626",
-    "PANEL2": "#121C2F",
-    "BORDER": "#243044",
-    "FG": "#C7D1DB",
-    "MUTED": "#8B949E",
-    "ACCENT": "#00FF66",
-    "ACCENT2": "#00E5FF",
-    "SELECT_BG": "#17324A",
-    "SELECT_FG": "#00FF66",
-}
-
-# Blue family for paper mode. Same key names so the same style code paths work.
-# ACCENT swapped to a warm gold so "PAPER TRADING" pops against the blue.
-PAPER_PALETTE: Dict[str, str] = {
-    "BG": "#0A1B3A",
-    "BG2": "#11264D",
-    "PANEL": "#152E5C",
-    "PANEL2": "#1B3870",
-    "BORDER": "#2E4A82",
-    "FG": "#E6EEF8",
-    "MUTED": "#9AB0CC",
-    "ACCENT": "#FFC400",
-    "ACCENT2": "#FFE082",
-    "SELECT_BG": "#23488A",
-    "SELECT_FG": "#FFC400",
-}
-
-
-def get_palette(paper_mode: bool) -> Dict[str, str]:
-    return PAPER_PALETTE if paper_mode else DARK_PALETTE
-
+# Say BLUE instead of BLACK." Tk has no CSS: ui_tokens.PAPER mirrors the dark
+# palette's keys in blue, and the hub applies the one that matches the mode.
 
 # --- Settings persistence -----------------------------------------------------
 # The mode itself lives in `trading.mode` (see trading_mode.py) - the single
@@ -199,8 +164,8 @@ class PaperBanner(tk.Frame):
             text="PAPER TRADING",
             bg=palette["ACCENT"],
             fg=palette["BG"],
-            font=("Segoe UI", 14, "bold"),
-            padx=14,
+            font=ui_tokens.font("display", "bold"),
+            padx=12,
             pady=4,
         )
         label.pack(side="left")
@@ -211,7 +176,7 @@ class PaperBanner(tk.Frame):
             textvariable=self.price_var,
             bg=palette["ACCENT"],
             fg=palette["BG"],
-            font=("Segoe UI", 10),
+            font=ui_tokens.font("body"),
             padx=10,
         )
         price_lbl.pack(side="left")
@@ -236,7 +201,7 @@ class PaperBanner(tk.Frame):
             textvariable=self.result_var,
             bg=palette["ACCENT"],
             fg=palette["BG"],
-            font=("Segoe UI", 9, "italic"),
+            font=ui_tokens.font("small", "italic"),
             padx=8,
         )
         result_lbl.pack(side="right")
@@ -262,106 +227,9 @@ def attach_trading_section_label(parent: tk.Misc, palette: Dict[str, str]) -> tk
         text="PAPER TRADING",
         bg=palette["BG"],
         fg=palette["ACCENT"],
-        font=("Segoe UI", 12, "bold"),
+        font=ui_tokens.font("title", "bold"),
         pady=2,
     )
-
-
-# --- Style application -------------------------------------------------------
-def apply_palette_to_style(
-    root: tk.Misc, style: ttk.Style, palette: Dict[str, str]
-) -> None:
-    """
-    Re-runs the subset of pt_hub's `_apply_forced_dark_mode` styling that is
-    palette-driven, but using whichever palette was passed. Kept in sync with
-    pt_hub.py by hand - if you add a new ttk style there, mirror it here.
-    """
-    try:
-        root.configure(bg=palette["BG"])
-    except tk.TclError:
-        pass
-
-    style.configure(".", background=palette["BG"], foreground=palette["FG"])
-
-    for name in ("TFrame", "TLabel", "TCheckbutton", "TRadiobutton"):
-        style.configure(name, background=palette["BG"], foreground=palette["FG"])
-
-    style.configure(
-        "TLabelframe",
-        background=palette["BG"],
-        foreground=palette["FG"],
-        bordercolor=palette["BORDER"],
-    )
-    style.configure(
-        "TLabelframe.Label",
-        background=palette["BG"],
-        foreground=palette["ACCENT"],
-    )
-
-    style.configure("TSeparator", background=palette["BORDER"])
-
-    style.configure(
-        "TButton",
-        background=palette["BG2"],
-        foreground=palette["FG"],
-        bordercolor=palette["BORDER"],
-        focusthickness=1,
-        focuscolor=palette["ACCENT"],
-        padding=(3, 2),
-    )
-    style.map(
-        "TButton",
-        background=[
-            ("active", palette["PANEL2"]),
-            ("pressed", palette["PANEL"]),
-            ("disabled", palette["BG2"]),
-        ],
-        foreground=[
-            ("active", palette["ACCENT"]),
-            ("disabled", palette["MUTED"]),
-        ],
-    )
-
-    # The Chart settings cog shows no border: its edges take its background, which
-    # is the frame colour, and hovering lights the whole button.
-    edges = ("background", "bordercolor", "lightcolor", "darkcolor", "focuscolor")
-    style.configure(
-        "ChartCog.TButton",
-        foreground=palette["FG"],
-        **{edge: palette["BG"] for edge in edges},
-    )
-    hover = [("pressed", palette["PANEL"]), ("active", palette["PANEL2"])]
-    style.map(
-        "ChartCog.TButton",
-        foreground=[("active", palette["ACCENT2"])],
-        **{edge: hover for edge in edges},
-    )
-
-
-def install_classic_widget_defaults(root: tk.Misc, palette: Dict[str, str]) -> None:
-    """
-    Tk classic widgets read their colors at creation time via option_add.
-    We call this once before the layout is built so newly-created Text,
-    Listbox and Menu widgets pick up paper-mode colors.
-    """
-    try:
-        root.option_add("*Text.background", palette["PANEL"])
-        root.option_add("*Text.foreground", palette["FG"])
-        root.option_add("*Text.insertBackground", palette["FG"])
-        root.option_add("*Text.selectBackground", palette["SELECT_BG"])
-        root.option_add("*Text.selectForeground", palette["SELECT_FG"])
-
-        root.option_add("*Listbox.background", palette["PANEL"])
-        root.option_add("*Listbox.foreground", palette["FG"])
-        root.option_add("*Listbox.selectBackground", palette["SELECT_BG"])
-        root.option_add("*Listbox.selectForeground", palette["SELECT_FG"])
-
-        root.option_add("*Menu.background", palette["BG2"])
-        root.option_add("*Menu.foreground", palette["FG"])
-        root.option_add("*Menu.activeBackground", palette["SELECT_BG"])
-        root.option_add("*Menu.activeForeground", palette["SELECT_FG"])
-    except tk.TclError:
-        pass
 
 
 # --- Read settings without instantiating the hub ----------------------------

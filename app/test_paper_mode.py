@@ -15,11 +15,9 @@ import unittest
 from decimal import Decimal
 from unittest import mock
 
+import ui_tokens
 from pt_paper_mode import (
-    DARK_PALETTE,
-    PAPER_PALETTE,
     fetch_binance_btc_price,
-    get_palette,
     is_paper_mode,
     read_paper_mode_from_disk,
     run_sample_scenario,
@@ -32,13 +30,13 @@ class TestPalette(unittest.TestCase):
     """Palette pairs must mirror each other key-for-key."""
 
     def test_dark_palette_keys_match_paper_palette(self):
-        self.assertEqual(set(DARK_PALETTE.keys()), set(PAPER_PALETTE.keys()))
+        self.assertEqual(set(ui_tokens.DARK), set(ui_tokens.PAPER))
 
     def test_get_palette_paper_is_blue(self):
         # BG hex starts with 0A1B = blueish; basic sanity check that we did not
         # accidentally swap the constants.
-        self.assertTrue(get_palette(True)["BG"].lower().startswith("#0a1b"))
-        self.assertTrue(get_palette(False)["BG"].lower().startswith("#070b"))
+        self.assertTrue(ui_tokens.palette(True)["BG"].lower().startswith("#0a1b"))
+        self.assertTrue(ui_tokens.palette(False)["BG"].lower().startswith("#070b"))
 
 
 class TestSettingsPersistence(unittest.TestCase):

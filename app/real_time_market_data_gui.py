@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from tkinter import messagebox, ttk
 from typing import Any, Dict, List, Optional
 
+import ui_tokens
+
 try:
     from real_time_market_data import (
         DataSource,
@@ -35,22 +37,6 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
     print("Warning: Matplotlib not available. Charts disabled.")
-
-# Dark theme colors
-DARK_BG = "#070B10"
-DARK_BG2 = "#0B1220"
-DARK_PANEL = "#0E1626"
-DARK_PANEL2 = "#121C2F"
-DARK_BORDER = "#243044"
-DARK_FG = "#C7D1DB"
-DARK_MUTED = "#8B949E"
-DARK_ACCENT = "#00FF66"
-DARK_ACCENT2 = "#00E5FF"
-DARK_SELECT_BG = "#17324A"
-DARK_SELECT_FG = "#00FF66"
-DARK_ERROR = "#FF4757"
-DARK_WARNING = "#FFA502"
-DARK_SUCCESS = "#2ED573"
 
 
 class MarketDataGUI:
@@ -130,29 +116,29 @@ class MarketDataGUI:
         frame = ttk.Frame(self.parent)
         frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ttk.Label(frame, text="Real-time Market Data", font=("Arial", 16, "bold")).pack(
-            pady=20
-        )
+        ttk.Label(
+            frame, text="Real-time Market Data", font=ui_tokens.font("display", "bold")
+        ).pack(pady=20)
 
         if not MARKET_DATA_AVAILABLE:
             ttk.Label(
                 frame,
                 text="⚠️ Real-time market data module not available",
-                foreground=DARK_WARNING,
-                font=("Arial", 12),
+                style="Warn.TLabel",
+                font=ui_tokens.font("title"),
             ).pack(pady=10)
         else:
             ttk.Label(
                 frame,
                 text="⚠️ Market data dependencies missing",
-                foreground=DARK_WARNING,
-                font=("Arial", 12),
+                style="Warn.TLabel",
+                font=ui_tokens.font("title"),
             ).pack(pady=10)
 
         ttk.Label(
             frame,
             text="Required for real-time market data:",
-            font=("Arial", 10, "bold"),
+            font=ui_tokens.font("body", "bold"),
         ).pack(pady=5)
 
         deps = [
@@ -161,13 +147,13 @@ class MarketDataGUI:
             "pip install pandas numpy",
         ]
         for dep in deps:
-            ttk.Label(frame, text=f"• {dep}", foreground=DARK_MUTED).pack()
+            ttk.Label(frame, text=f"• {dep}", style="Muted.TLabel").pack()
 
         ttk.Label(
             frame,
             text="Install missing dependencies to enable real-time market data",
-            foreground=DARK_MUTED,
-            font=("Arial", 10),
+            style="Muted.TLabel",
+            font=ui_tokens.font("body"),
         ).pack(pady=10)
 
     def setup_overview_tab(self):
@@ -208,7 +194,7 @@ class MarketDataGUI:
 
         ttk.Label(status_frame, text="Data Feeds:").pack(side="left")
         self.feed_status_label = ttk.Label(
-            status_frame, text="Disconnected", foreground=DARK_ERROR
+            status_frame, text="Disconnected", style="Bad.TLabel"
         )
         self.feed_status_label.pack(side="left", padx=5)
 
@@ -304,23 +290,24 @@ class MarketDataGUI:
         chart_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Create matplotlib figure
+        chart = ui_tokens.CHART
         self.figure = Figure(figsize=(12, 8), dpi=100)
-        self.figure.patch.set_facecolor(DARK_BG)
+        self.figure.patch.set_facecolor(chart["figure"])
 
         # Price subplot
         self.price_ax = self.figure.add_subplot(211)
-        self.price_ax.set_facecolor(DARK_PANEL)
-        self.price_ax.tick_params(colors=DARK_FG)
-        self.price_ax.set_title("Price Chart", color=DARK_FG)
-        self.price_ax.set_ylabel("Price", color=DARK_FG)
+        self.price_ax.set_facecolor(chart["plot"])
+        self.price_ax.tick_params(colors=chart["text"])
+        self.price_ax.set_title("Price Chart", color=chart["text"])
+        self.price_ax.set_ylabel("Price", color=chart["text"])
 
         # Volume subplot
         self.volume_ax = self.figure.add_subplot(212)
-        self.volume_ax.set_facecolor(DARK_PANEL)
-        self.volume_ax.tick_params(colors=DARK_FG)
-        self.volume_ax.set_title("Volume", color=DARK_FG)
-        self.volume_ax.set_ylabel("Volume", color=DARK_FG)
-        self.volume_ax.set_xlabel("Time", color=DARK_FG)
+        self.volume_ax.set_facecolor(chart["plot"])
+        self.volume_ax.tick_params(colors=chart["text"])
+        self.volume_ax.set_title("Volume", color=chart["text"])
+        self.volume_ax.set_ylabel("Volume", color=chart["text"])
+        self.volume_ax.set_xlabel("Time", color=chart["text"])
 
         self.figure.tight_layout()
 
@@ -486,7 +473,10 @@ class MarketDataGUI:
             frame.grid(row=row, column=col, sticky="w", padx=10, pady=5)
 
             self.feed_indicators[feed] = tk.Label(
-                frame, text="●", foreground=DARK_ERROR, font=("Arial", 16)
+                frame,
+                text="●",
+                foreground=ui_tokens.STATUS["bad"],
+                font=ui_tokens.font("display"),
             )
             self.feed_indicators[feed].pack(side="left")
 
@@ -599,9 +589,9 @@ class MarketDataGUI:
         self.subscriptions_count_label.config(text=str(count))
 
         if count > 0:
-            self.feed_status_label.config(text="Connected", foreground=DARK_SUCCESS)
+            self.feed_status_label.config(text="Connected", style="Good.TLabel")
         else:
-            self.feed_status_label.config(text="Disconnected", foreground=DARK_ERROR)
+            self.feed_status_label.config(text="Disconnected", style="Bad.TLabel")
 
     def on_market_update(self, data_type: str, data: Any):
         """Handle market data updates"""
@@ -709,8 +699,8 @@ class MarketDataGUI:
             self.data_tree.item(existing_item, tags=tags)
 
         # Configure tag colors
-        self.data_tree.tag_configure("positive", foreground=DARK_SUCCESS)
-        self.data_tree.tag_configure("negative", foreground=DARK_ERROR)
+        self.data_tree.tag_configure("positive", foreground=ui_tokens.STATUS["good"])
+        self.data_tree.tag_configure("negative", foreground=ui_tokens.STATUS["bad"])
 
     def update_chart(self):
         """Update price chart"""
@@ -742,22 +732,23 @@ class MarketDataGUI:
         self.volume_ax.clear()
 
         # Plot price
-        self.price_ax.plot(timestamps, prices, color=DARK_ACCENT, linewidth=1.5)
-        self.price_ax.set_facecolor(DARK_PANEL)
-        self.price_ax.tick_params(colors=DARK_FG)
-        self.price_ax.set_title(f"{symbol} Price Chart", color=DARK_FG)
-        self.price_ax.set_ylabel("Price", color=DARK_FG)
+        chart = ui_tokens.CHART
+        self.price_ax.plot(timestamps, prices, color=chart["series"], linewidth=1.5)
+        self.price_ax.set_facecolor(chart["plot"])
+        self.price_ax.tick_params(colors=chart["text"])
+        self.price_ax.set_title(f"{symbol} Price Chart", color=chart["text"])
+        self.price_ax.set_ylabel("Price", color=chart["text"])
         self.price_ax.grid(True, alpha=0.3)
 
         # Plot volume
         self.volume_ax.bar(
-            timestamps, volumes, color=DARK_ACCENT2, alpha=0.7, width=0.0001
+            timestamps, volumes, color=chart["series2"], alpha=0.7, width=0.0001
         )
-        self.volume_ax.set_facecolor(DARK_PANEL)
-        self.volume_ax.tick_params(colors=DARK_FG)
-        self.volume_ax.set_title("Volume", color=DARK_FG)
-        self.volume_ax.set_ylabel("Volume", color=DARK_FG)
-        self.volume_ax.set_xlabel("Time", color=DARK_FG)
+        self.volume_ax.set_facecolor(chart["plot"])
+        self.volume_ax.tick_params(colors=chart["text"])
+        self.volume_ax.set_title("Volume", color=chart["text"])
+        self.volume_ax.set_ylabel("Volume", color=chart["text"])
+        self.volume_ax.set_xlabel("Time", color=chart["text"])
         self.volume_ax.grid(True, alpha=0.3)
 
         # Format x-axis
@@ -827,7 +818,7 @@ class MarketDataGUI:
             )
 
         # Configure tag colors
-        self.arb_tree.tag_configure("opportunity", foreground=DARK_SUCCESS)
+        self.arb_tree.tag_configure("opportunity", foreground=ui_tokens.STATUS["good"])
 
     def cleanup(self):
         """Cleanup when closing"""
@@ -859,29 +850,31 @@ if not MARKET_DATA_AVAILABLE:
             frame.pack(fill="both", expand=True, padx=20, pady=20)
 
             ttk.Label(
-                frame, text="Real-time Market Data", font=("Arial", 16, "bold")
+                frame,
+                text="Real-time Market Data",
+                font=ui_tokens.font("display", "bold"),
             ).pack(pady=20)
 
             ttk.Label(
                 frame,
                 text="⚠️ Real-time market data not available",
-                foreground=DARK_WARNING,
-                font=("Arial", 12),
+                style="Warn.TLabel",
+                font=ui_tokens.font("title"),
             ).pack(pady=10)
 
             ttk.Label(
-                frame, text="Missing dependencies:", font=("Arial", 10, "bold")
+                frame, text="Missing dependencies:", font=ui_tokens.font("body", "bold")
             ).pack(pady=5)
 
             deps = ["Real-time market data module", "WebSocket support", "CCXT library"]
             for dep in deps:
-                ttk.Label(frame, text=f"• {dep}", foreground=DARK_ERROR).pack()
+                ttk.Label(frame, text=f"• {dep}", style="Bad.TLabel").pack()
 
             ttk.Label(
                 frame,
                 text="Install missing dependencies to enable real-time market data",
-                foreground=DARK_MUTED,
-                font=("Arial", 10),
+                style="Muted.TLabel",
+                font=ui_tokens.font("body"),
             ).pack(pady=10)
 
         def cleanup(self):

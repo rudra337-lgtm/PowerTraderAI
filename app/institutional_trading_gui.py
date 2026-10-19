@@ -12,6 +12,8 @@ from decimal import Decimal
 from tkinter import messagebox, ttk
 from typing import Any, Dict, List
 
+import ui_theme
+import ui_tokens
 from institutional_trading import (
     InstitutionalOrder,
     InstitutionalOrderType,
@@ -31,10 +33,6 @@ class InstitutionalTradingGUI:
         self.frame = ttk.Frame(parent)
         self.frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Style configuration
-        self.style = ttk.Style()
-        self.configure_styles()
-
         self.setup_gui()
 
         # Start background monitoring
@@ -43,26 +41,6 @@ class InstitutionalTradingGUI:
             target=self.monitor_performance, daemon=True
         )
         self.monitor_thread.start()
-
-    def configure_styles(self):
-        """Configure professional styling"""
-        self.style.configure(
-            "Title.TLabel", font=("Segoe UI", 12, "bold"), foreground="#2c3e50"
-        )
-
-        self.style.configure(
-            "Header.TLabel", font=("Segoe UI", 10, "bold"), foreground="#34495e"
-        )
-
-        self.style.configure(
-            "Success.TLabel", font=("Segoe UI", 9), foreground="#27ae60"
-        )
-
-        self.style.configure(
-            "Warning.TLabel", font=("Segoe UI", 9), foreground="#e67e22"
-        )
-
-        self.style.configure("Error.TLabel", font=("Segoe UI", 9), foreground="#e74c3c")
 
     def setup_gui(self):
         """Setup the institutional trading interface"""
@@ -76,7 +54,7 @@ class InstitutionalTradingGUI:
 
         # Status indicator
         self.status_label = ttk.Label(
-            header_frame, text="● Online", style="Success.TLabel"
+            header_frame, text="● Online", style="Good.TLabel"
         )
         self.status_label.pack(side=tk.RIGHT)
 
@@ -286,7 +264,7 @@ class InstitutionalTradingGUI:
         ).pack(side=tk.LEFT, padx=(0, 10))
 
         self.batch_file_label = ttk.Label(
-            upload_btn_frame, text="No file selected", style="Warning.TLabel"
+            upload_btn_frame, text="No file selected", style="Warn.TLabel"
         )
         self.batch_file_label.pack(side=tk.LEFT, padx=(20, 0))
 
@@ -526,7 +504,7 @@ class InstitutionalTradingGUI:
 
             var = tk.StringVar(value="0")
             self.metric_vars[key] = var
-            ttk.Label(metrics_grid, textvariable=var, style="Success.TLabel").grid(
+            ttk.Label(metrics_grid, textvariable=var, style="Good.TLabel").grid(
                 row=row, column=col + 1, sticky=tk.W, pady=5
             )
 
@@ -537,8 +515,8 @@ class InstitutionalTradingGUI:
         ttk.Label(
             chart_frame,
             text="📊 Performance visualization would go here",
-            font=("Segoe UI", 10),
-            foreground="#7f8c8d",
+            style="Muted.TLabel",
+            font=ui_tokens.font("body"),
         ).pack(expand=True)
 
         # Account performance
@@ -604,7 +582,7 @@ class InstitutionalTradingGUI:
 
             var = tk.StringVar(value="● Online")
             self.status_vars[key] = var
-            ttk.Label(status_grid, textvariable=var, style="Success.TLabel").grid(
+            ttk.Label(status_grid, textvariable=var, style="Good.TLabel").grid(
                 row=row, column=col + 1, sticky=tk.W, pady=5
             )
 
@@ -617,9 +595,7 @@ class InstitutionalTradingGUI:
             log_frame,
             height=15,
             wrap=tk.WORD,
-            font=("Consolas", 9),
-            bg="#2c3e50",
-            fg="#ecf0f1",
+            font=ui_tokens.mono("small"),
         )
         log_scroll = ttk.Scrollbar(
             log_frame, orient=tk.VERTICAL, command=self.log_text.yview
@@ -847,14 +823,15 @@ class InstitutionalTradingGUI:
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # Color coding
+        p = ui_theme.active_palette()
         colors = {
-            "INFO": "#3498db",
-            "SUCCESS": "#27ae60",
-            "WARNING": "#f39c12",
-            "ERROR": "#e74c3c",
+            "INFO": p["ACCENT2"],
+            "SUCCESS": ui_tokens.STATUS["good"],
+            "WARNING": ui_tokens.STATUS["warn"],
+            "ERROR": ui_tokens.STATUS["bad"],
         }
 
-        color = colors.get(level, "#ecf0f1")
+        color = colors.get(level, p["FG"])
 
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, f"[{timestamp}] {level}: {message}\n")
@@ -910,7 +887,7 @@ class InstitutionalTradingGUI:
 
 if __name__ == "__main__":
     # Test the GUI
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     root.title("Institutional Trading System")
     root.geometry("1200x800")
 

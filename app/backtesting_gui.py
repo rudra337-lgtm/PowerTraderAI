@@ -13,6 +13,9 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+import ui_theme
+import ui_tokens
+
 try:
     from backtesting_engine import (
         BacktestEngine,
@@ -44,7 +47,7 @@ class BacktestingGUI:
     def __init__(self, parent=None):
         """Initialize the Backtesting GUI."""
         if parent is None:
-            self.root = tk.Tk()
+            self.root = ui_theme.themed_root()
             self.root.title("Backtesting Framework")
             self.root.geometry("1400x900")
         else:
@@ -82,26 +85,28 @@ class BacktestingGUI:
 
     def show_dependency_message(self):
         """Show message about missing dependencies."""
+        p = ui_theme.active_palette()
         msg_frame = tk.Frame(self.root)
         msg_frame.pack(fill=tk.BOTH, expand=True)
 
         tk.Label(
             msg_frame,
             text="Backtesting Framework - Enhanced Features Available",
-            font=("Arial", 16, "bold"),
+            font=ui_tokens.font("display", "bold"),
         ).pack(pady=20)
 
         tk.Label(
             msg_frame,
             text="For full backtesting capabilities, install optional dependencies:",
-            font=("Arial", 12),
+            font=ui_tokens.font("title"),
         ).pack(pady=10)
 
         tk.Label(
             msg_frame,
             text="python app/install_optional_deps.py",
-            font=("Courier", 10),
-            background="lightgray",
+            font=ui_tokens.mono("body"),
+            background=p["PANEL"],
+            foreground=p["FG"],
         ).pack(pady=5)
 
         features = [
@@ -116,11 +121,11 @@ class BacktestingGUI:
         tk.Label(
             msg_frame,
             text="Features available with enhanced dependencies:",
-            font=("Arial", 11, "bold"),
+            font=ui_tokens.font("subtitle", "bold"),
         ).pack(pady=(20, 5))
 
         for feature in features:
-            tk.Label(msg_frame, text=feature, font=("Arial", 10)).pack(
+            tk.Label(msg_frame, text=feature, font=ui_tokens.font("body")).pack(
                 anchor="w", padx=100
             )
 
@@ -1053,13 +1058,20 @@ This is a mean-reversion strategy that works well in ranging markets.""",
         fig, ax = plt.subplots(figsize=(10, 6))
 
         equity_curve = self.backtest_results.equity_curve
-        ax.plot(equity_curve.index, equity_curve.values, linewidth=2, label="Strategy")
+        ax.plot(
+            equity_curve.index,
+            equity_curve.values,
+            color=ui_tokens.CHART["series"],
+            linewidth=2,
+            label="Strategy",
+        )
 
         # Add benchmark if available
         if self.backtest_results.benchmark_curve is not None:
             ax.plot(
                 self.backtest_results.benchmark_curve.index,
                 self.backtest_results.benchmark_curve.values,
+                color=ui_tokens.CHART["series2"],
                 linewidth=2,
                 label="Benchmark",
                 alpha=0.7,
@@ -1073,6 +1085,7 @@ This is a mean-reversion strategy that works well in ranging markets.""",
 
         # Format y-axis as currency
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"${x:,.0f}"))
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.chart_frame)
         canvas.draw()
@@ -1094,10 +1107,15 @@ This is a mean-reversion strategy that works well in ranging markets.""",
             drawdowns.values * 100,
             0,
             alpha=0.3,
-            color="red",
+            color=ui_tokens.STATUS["bad"],
             label="Drawdown",
         )
-        ax.plot(drawdowns.index, drawdowns.values * 100, color="red", linewidth=1)
+        ax.plot(
+            drawdowns.index,
+            drawdowns.values * 100,
+            color=ui_tokens.STATUS["bad"],
+            linewidth=1,
+        )
 
         ax.set_title("Drawdown Analysis")
         ax.set_xlabel("Date")
@@ -1107,9 +1125,13 @@ This is a mean-reversion strategy that works well in ranging markets.""",
         # Add max drawdown line
         max_dd = drawdowns.min() * 100
         ax.axhline(
-            y=max_dd, color="red", linestyle="--", label=f"Max Drawdown: {max_dd:.2f}%"
+            y=max_dd,
+            color=ui_tokens.STATUS["bad"],
+            linestyle="--",
+            label=f"Max Drawdown: {max_dd:.2f}%",
         )
         ax.legend()
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.chart_frame)
         canvas.draw()
@@ -1153,6 +1175,7 @@ This is a mean-reversion strategy that works well in ranging markets.""",
         ax.set_title("Monthly Returns Heatmap")
         ax.set_xlabel("Month")
         ax.set_ylabel("Year")
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.chart_frame)
         canvas.draw()
@@ -1174,11 +1197,15 @@ This is a mean-reversion strategy that works well in ranging markets.""",
 
         # Returns distribution
         ax1.hist(
-            np.array(returns) * 100, bins=50, alpha=0.7, density=True, color="blue"
+            np.array(returns) * 100,
+            bins=50,
+            alpha=0.7,
+            density=True,
+            color=ui_tokens.CHART["series"],
         )
         ax1.axvline(
             np.mean(returns) * 100,
-            color="red",
+            color=ui_tokens.CHART["text"],
             linestyle="--",
             label=f"Mean: {np.mean(returns)*100:.1f}%",
         )
@@ -1189,10 +1216,16 @@ This is a mean-reversion strategy that works well in ranging markets.""",
         ax1.grid(True, alpha=0.3)
 
         # Final capital distribution
-        ax2.hist(final_capitals, bins=50, alpha=0.7, density=True, color="green")
+        ax2.hist(
+            final_capitals,
+            bins=50,
+            alpha=0.7,
+            density=True,
+            color=ui_tokens.CHART["series2"],
+        )
         ax2.axvline(
             np.mean(final_capitals),
-            color="red",
+            color=ui_tokens.CHART["text"],
             linestyle="--",
             label=f"Mean: ${np.mean(final_capitals):,.0f}",
         )
@@ -1203,6 +1236,7 @@ This is a mean-reversion strategy that works well in ranging markets.""",
         ax2.grid(True, alpha=0.3)
 
         plt.tight_layout()
+        ui_theme.theme_figure(fig)
 
         canvas = FigureCanvasTkAgg(fig, self.mc_chart_frame)
         canvas.draw()
@@ -1211,7 +1245,7 @@ This is a mean-reversion strategy that works well in ranging markets.""",
 
 def main():
     """Run the Backtesting GUI."""
-    root = tk.Tk()
+    root = ui_theme.themed_root()
     app = BacktestingGUI(root)
     root.mainloop()
 
