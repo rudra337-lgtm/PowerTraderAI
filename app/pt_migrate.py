@@ -21,8 +21,8 @@ Rules:
   rewritten or created). ``remove_old_files`` deletes migrated legacy copies only when called with
   ``confirmed=True`` (the hub asks first and warns that they may hold
   plaintext credentials). A legacy file whose content was not migrated (a
-  keyring conflict, a credential that could not be stored, or a ``--from``
-  import that conflicted) is never offered.
+  keyring conflict, or a credential that could not be stored) is never
+  offered.
 * Before deleting, every legacy file is checked again against the migration
   record: it must be recorded as migrated and safe to remove, its SHA-256 must
   still be the one recorded when it was migrated, and its migrated copy (a
@@ -56,7 +56,8 @@ Rules:
   there never rolls back and a trading mode never changes. A legacy file that
   differs from a file already there is copied next to it as
   ``<name>.conflict-<source>.<ext>`` (``<source>`` is ``app`` for
-  ``legacy_dir()`` and ``root`` for ``legacy_install_dir()``; a name without
+  ``legacy_dir()``, ``root`` for ``legacy_install_dir()`` and ``import`` for a
+  file imported with ``--from``; a name without
   an extension gets no ``.<ext>``; ``-2``, ``-3``, ... follow ``<source>``
   when the name is taken by other content). When both legacy folders hold
   different versions of a file the new location does not have yet, the newer
@@ -153,6 +154,7 @@ SQLITE_DATA_SIDECARS = ("-wal", "-journal")
 # Which legacy folder a file comes from, as its conflict copy names it.
 APP = "app"  # pt_paths.legacy_dir()
 ROOT = "root"  # pt_paths.legacy_install_dir()
+IMPORT = "import"  # a file imported with --from (import_config_file)
 CONFLICT = ".conflict-"
 
 # Robinhood legacy files.
@@ -257,7 +259,7 @@ class Report:
                 )
                 lines.append(f"{top}{name(target)}: {kept} (in use)")
             for source in sources:
-                if source not in saved:  # an import (--from): nothing copied
+                if source not in saved:  # a conflict that kept no copy
                     lines.append(
                         f"{top}{name(source)} was not copied; kept {name(target)}"
                     )
@@ -676,15 +678,14 @@ def _write_config(
     data,
     report: Report,
     state: _State,
-    label: Optional[str] = None,
+    label: str,
 ) -> Optional[str]:
     """Write the cleaned config ``data`` to ``target``, never over a file.
-    Returns where its content is now (``target``, or the conflict copy), or
-    None. A ``target`` that holds something else is kept as it is: ``data``
-    (the same cleaned content, no credential) goes to the conflict copy next
-    to it, so a setting never rolls back and the trading mode never changes.
-    Without ``label`` (an import with ``--from``) nothing is written then and
-    the conflict is only listed."""
+    Returns where its content is now (``target``, or the conflict copy). A
+    ``target`` that holds something else is kept as it is: ``data`` (the same
+    cleaned content, no credential) goes to the conflict copy next to it,
+    ``<name>.conflict-<label>.<ext>`` (``import`` for ``--from``, #135), so a
+    setting never rolls back and the trading mode never changes."""
     key = f"config:{source}"
     seen = state.entry(key, source)
     if seen is not None:
@@ -699,10 +700,6 @@ def _write_config(
     if _holds(target, content):  # migrated before: nothing new
         state.mark(key, source, True)
         return target
-    if label is None:
-        report.conflicts.append((source, target))
-        state.mark(key, source, False)
-        return None
     copy, found = _conflict_copy(
         target, label, lambda name: True if _holds(name, content) else None
     )
@@ -1058,7 +1055,7 @@ def _migrate_config(
     state: _State,
     legacy_roots: Iterable[str],
     keep: bool = False,
-    label: Optional[str] = None,
+    label: str = APP,
 ) -> bool:
     """One legacy config file: credentials to the keyring, the rest to the
     config folder (or, if a different file is there, to its conflict copy
@@ -1071,8 +1068,9 @@ def _migrate_config(
     same file as its target (a hard link, or a link either way), is the new
     app's own config: skipped, never recorded, never offered for removal."""
     target = pt_paths.config_file(kind)
-    if _same_file(source, target) or (label is not None and _in_new_location(source)):
-        if label is None:  # --from
+    legacy = label in (APP, ROOT)
+    if _same_file(source, target) or (legacy and _in_new_location(source)):
+        if label == IMPORT:
             report.errors.append(
                 (source, "is the config file in use; nothing to import")
             )
@@ -1133,8 +1131,10 @@ def import_config_file(path: str, kind: Optional[str] = None) -> Report:
     """Import one config file from any location (e.g. a backup copied out of
     the repo). Same rules: credentials to the keyring, the rest to the config
     folder, nothing overwritten, nothing deleted. If the config folder holds a
-    different file of that kind, nothing is written and the conflict is
-    listed (no conflict copy: conflict copies are for the legacy folders)."""
+    different file of that kind, that file is kept and the cleaned import goes
+    next to it as ``<name>.conflict-import.<ext>`` (``-2``, ``-3``, ... if
+    that name holds other content; an identical copy is reused), and both are
+    listed (#135)."""
     report = Report()
     path = os.path.abspath(path)
     if not os.path.isfile(path):
@@ -1144,7 +1144,7 @@ def import_config_file(path: str, kind: Optional[str] = None) -> Report:
     if kind is None:
         return report
     state = _State()
-    _migrate_config(path, kind, report, state, [os.path.dirname(path)])
+    _migrate_config(path, kind, report, state, [os.path.dirname(path)], label=IMPORT)
     state.save()
     return report
 
