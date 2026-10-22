@@ -26,6 +26,7 @@ from nacl.signing import SigningKey
 import model_store
 import pt_paths
 from market_data import listing as market_listing
+from pattern_model import GAP_PASS_LIMIT
 from pt_credentials import get_credentials
 from pt_data_provider import get_data_provider
 
@@ -810,6 +811,22 @@ def _note_coin_error(sym: str, exc) -> None:
 _LAST_COIN_ERROR = {}
 
 
+def _hold_unseparated_bounds(sym: str) -> None:
+    """The gap pass reached GAP_PASS_LIMIT (#153: a bound of 0 never moves apart, and
+    the pass used to loop for ever, stopping the runner at this coin). The coin keeps
+    its last bounds and signal files this pass, and the runner goes on to the next
+    coin."""
+    message = f"its bounds did not separate in {GAP_PASS_LIMIT:,} passes"
+    if _LAST_COIN_ERROR.get(sym) != message:
+        print(f"{sym}: signals skipped this pass - {message}")
+        sys.stdout.flush()
+    _LAST_COIN_ERROR[sym] = message
+    try:
+        display_cache[sym] = f"{sym}  (SKIPPED - {message}; no new signals this pass)"
+    except Exception:
+        pass
+
+
 def _coins_needed_for_ready(coins) -> int:
     """How many coins must be ready: skipped coins never will be."""
     return len([c for c in coins if c not in UNAVAILABLE_COINS])
@@ -1467,7 +1484,13 @@ def step_coin(sym: str):
 
         og_index = 0
         gap_modifier = 0.0
+        gap_passes = 0
+        separated = True
         while True:
+            gap_passes += 1
+            if gap_passes > GAP_PASS_LIMIT:  # #153: never ends on a bound of 0
+                separated = False
+                break
             if (
                 new_low_bound_prices[og_index] == 0.01
                 or new_low_bound_prices[og_index + 1] == 0.01
@@ -1538,45 +1561,50 @@ def step_coin(sym: str):
             if og_index >= len(new_low_bound_prices) - 1:
                 break
 
-        og_index = 0
-        low_bound_prices = []
-        high_bound_prices = []
-        while True:
-            try:
-                low_bound_prices.append(
-                    new_low_bound_prices[og_low_index_list.index(og_index)]
-                )
-            except:
-                pass
-            try:
-                high_bound_prices.append(
-                    new_high_bound_prices[og_high_index_list.index(og_index)]
-                )
-            except:
-                pass
-            og_index += 1
-            if og_index >= len(new_low_bound_prices):
-                break
+        if separated:
+            og_index = 0
+            low_bound_prices = []
+            high_bound_prices = []
+            while True:
+                try:
+                    low_bound_prices.append(
+                        new_low_bound_prices[og_low_index_list.index(og_index)]
+                    )
+                except:
+                    pass
+                try:
+                    high_bound_prices.append(
+                        new_high_bound_prices[og_high_index_list.index(og_index)]
+                    )
+                except:
+                    pass
+                og_index += 1
+                if og_index >= len(new_low_bound_prices):
+                    break
 
-        # bump bounds_version now that we've computed a new set of prediction bounds
-        st["bounds_version"] = bounds_version_used_for_messages + 1
+            # bump bounds_version now that we've computed a new set of prediction bounds
+            st["bounds_version"] = bounds_version_used_for_messages + 1
 
-        with open("low_bound_prices.html", "w+") as file:
-            file.write(
-                str(new_low_bound_prices)
-                .replace("', '", " ")
-                .replace("[", "")
-                .replace("]", "")
-                .replace("'", "")
-            )
-        with open("high_bound_prices.html", "w+") as file:
-            file.write(
-                str(new_high_bound_prices)
-                .replace("', '", " ")
-                .replace("[", "")
-                .replace("]", "")
-                .replace("'", "")
-            )
+            with open("low_bound_prices.html", "w+") as file:
+                file.write(
+                    str(new_low_bound_prices)
+                    .replace("', '", " ")
+                    .replace("[", "")
+                    .replace("]", "")
+                    .replace("'", "")
+                )
+            with open("high_bound_prices.html", "w+") as file:
+                file.write(
+                    str(new_high_bound_prices)
+                    .replace("', '", " ")
+                    .replace("[", "")
+                    .replace("]", "")
+                    .replace("'", "")
+                )
+        else:
+            # keep the bounds the coin had before this sweep (#153)
+            low_bound_prices = st["low_bound_prices"]
+            high_bound_prices = st["high_bound_prices"]
 
         # cache display text for this coin (main loop prints everything on one screen)
         try:
@@ -1608,39 +1636,42 @@ def step_coin(sym: str):
         except:
             PrintException()
 
-        # write PM + DCA signals (same as before)
-        try:
-            longs = tf_sides.count("long")
-            shorts = tf_sides.count("short")
-
-            # long pm
-            current_pms = [m for m in margins if m != 0]
+        if separated:
+            # write PM + DCA signals (same as before)
             try:
-                pm = sum(current_pms) / len(current_pms)
-                if pm < 0.25:
+                longs = tf_sides.count("long")
+                shorts = tf_sides.count("short")
+
+                # long pm
+                current_pms = [m for m in margins if m != 0]
+                try:
+                    pm = sum(current_pms) / len(current_pms)
+                    if pm < 0.25:
+                        pm = 0.25
+                except:
                     pm = 0.25
-            except:
-                pm = 0.25
 
-            with open("futures_profit_margin_spread.txt", "w+") as f:
-                f.write(str(pm))
+                with open("futures_profit_margin_spread.txt", "w+") as f:
+                    f.write(str(pm))
 
-            # short pm
-            current_pms = [m for m in margins if m != 0]
-            try:
-                pm = sum(current_pms) / len(current_pms)
-                if pm < 0.25:
+                # short pm
+                current_pms = [m for m in margins if m != 0]
+                try:
+                    pm = sum(current_pms) / len(current_pms)
+                    if pm < 0.25:
+                        pm = 0.25
+                except:
                     pm = 0.25
+
+                with open("futures_profit_margin_single.txt", "w+") as f:
+                    f.write(str(abs(pm)))
+
             except:
-                pm = 0.25
-
-            with open("futures_profit_margin_single.txt", "w+") as f:
-                f.write(str(abs(pm)))
-
-        except:
-            PrintException()
-            longs, shorts = 0, 0
-        _write_signal_counts(sym, longs, shorts)
+                PrintException()
+                longs, shorts = 0, 0
+            _write_signal_counts(sym, longs, shorts)
+        else:
+            _hold_unseparated_bounds(sym)
 
         # ====== NON-BLOCKING candle update check (single pass) ======
         this_index_now = 0
