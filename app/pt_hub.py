@@ -31,6 +31,12 @@ from matplotlib.patches import Rectangle
 from matplotlib.ticker import FuncFormatter
 from matplotlib.transforms import ScaledTranslation, blended_transform_factory
 
+# The program folder is read-only at runtime (pt_paths): run as the hub, Python
+# writes no bytecode cache next to the app modules imported from here on (#148).
+# The processes the hub starts get the same through _child_env.
+if __name__ == "__main__":
+    sys.dont_write_bytecode = True
+
 import chart_settings
 import pt_paths
 import ui_theme
@@ -2081,6 +2087,16 @@ class ProcInfo:
     proc: Optional[subprocess.Popen] = None
 
 
+def _child_env(hub_dir: str) -> Dict[str, str]:
+    """The environment for a process the hub starts (runner, trader, trainer):
+    the hub's own, plus where the hub reads their status, and no bytecode cache in
+    the read-only program folder (#148)."""
+    env = os.environ.copy()
+    env["POWERTRADER_HUB_DIR"] = hub_dir
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
 @dataclass
 class LogProc:
     """
@@ -3727,8 +3743,7 @@ class PowerTraderHub(tk.Tk):
             messagebox.showerror("Missing script", f"Cannot find: {p.path}")
             return
 
-        env = os.environ.copy()
-        env["POWERTRADER_HUB_DIR"] = self.hub_dir  # so rhcb writes where GUI reads
+        env = _child_env(self.hub_dir)  # so rhcb writes where GUI reads
 
         try:
             p.proc = subprocess.Popen(
@@ -5505,8 +5520,7 @@ Platform: {sys.platform}
         q: "queue.Queue[str]" = queue.Queue()
         info = ProcInfo(name=f"Trainer-{coin}", path=trainer_path)
 
-        env = os.environ.copy()
-        env["POWERTRADER_HUB_DIR"] = self.hub_dir
+        env = _child_env(self.hub_dir)
         # Force unbuffered output for Python subprocess
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
