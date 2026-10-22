@@ -48,6 +48,7 @@ from pt_paper_mode import (
     run_sample_scenario,
 )
 import trainer_guard
+import trainer_status
 from strategies.settings import read_strategy_settings
 from trading_mode import (
     PaperBookError,
@@ -340,17 +341,6 @@ def _log_line_tag(line: str) -> Optional[str]:
         if rule.search(line):
             return tag
     return None
-
-
-def _atomic_write_json(path: str, data: dict) -> None:
-    """Atomic JSON writing to prevent corruption during concurrent operations."""
-    try:
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)  # Atomic operation on Windows/Unix
-    except Exception:
-        pass
 
 
 def _atomic_write_text(path: str, content: str) -> None:
@@ -2143,28 +2133,6 @@ class PowerTraderHub(tk.Tk):
         self._paper_banner: Optional[PaperBanner] = None
         self._paper_section_label: Optional[tk.Label] = None
         self._paper_account = None  # lazy: only spun up when sample runs
-
-        # Enhanced training status tracking with atomic operations
-        def _write_training_status(coin: str, state: str, **kwargs) -> None:
-            """Write training status with atomic operations to prevent corruption."""
-            status_data = {
-                "coin": coin,
-                "state": state,  # TRAINING, FINISHED, ERROR, NOT_STARTED
-                "timestamp": int(time.time()),
-                **kwargs,
-            }
-
-            # Try to write to coin-specific status file
-            try:
-                coin_dir = os.path.join(self.settings["main_neural_dir"], coin)
-                if os.path.exists(coin_dir):
-                    status_path = os.path.join(coin_dir, "trainer_status.json")
-                    _atomic_write_json(status_path, status_data)
-            except Exception:
-                pass  # Non-critical status write failure
-
-        # Store the training status writer for use by other components
-        self._write_training_status = _write_training_status
 
         # Program folder (read-only): runner scripts are executed from here.
         self.project_dir = pt_paths.program_dir()
@@ -5152,13 +5120,10 @@ Platform: {sys.platform}
         if not folder or not os.path.isdir(folder):
             return False
 
-        # If trainer reports it's currently training, it's not "trained" yet.
-        try:
-            st = _safe_read_json(os.path.join(folder, "trainer_status.json"))
-            if isinstance(st, dict) and str(st.get("state", "")).upper() == "TRAINING":
-                return False
-        except Exception:
-            pass
+        # A coin whose trainer is still running is not "trained" yet (a killed
+        # trainer's TRAINING does not count: trainer_status).
+        if trainer_status.training_in(folder):
+            return False
 
         stamp_path = os.path.join(folder, "trainer_last_training_time.txt")
         try:
@@ -5197,13 +5162,10 @@ Platform: {sys.platform}
                 if not folder or not os.path.isdir(folder):
                     continue
 
-                status_path = os.path.join(folder, "trainer_status.json")
+                status_path = os.path.join(folder, trainer_status.FILE_NAME)
                 st = _safe_read_json(status_path)
 
-                if (
-                    isinstance(st, dict)
-                    and str(st.get("state", "")).upper() == "TRAINING"
-                ):
+                if trainer_status.is_training(st):
                     stamp_path = os.path.join(folder, "trainer_last_training_time.txt")
 
                     try:
@@ -5424,6 +5386,19 @@ Platform: {sys.platform}
             print(f"DEBUG: No coin in trainer_coin_var, returning")
             return
 
+        # Only a coin in the coin list trains. Any other has no folder of its own and
+        # would fall back to the root, which is BTC's folder: its files would be
+        # deleted and BTC's model replaced (#146).
+        if coin not in (self.coins or []):
+            print(f"DEBUG: {coin} is not in the coin list: not trained")
+            try:
+                self.status.config(
+                    text=f"Training refused for {coin}: it is not in Coins in Settings"
+                )
+            except Exception:
+                pass
+            return
+
         # A mock trainer is refused before anything is deleted (FDS-MDL).
         if not self._trainer_launch_allowed(coin):
             return
@@ -5435,7 +5410,10 @@ Platform: {sys.platform}
         # Match the trader's folder convention:
         #   BTC runs from the main neural folder
         #   Alts run from their own coin subfolder
-        coin_cwd = self.coin_folders.get(coin, self.settings["main_neural_dir"])
+        coin_cwd = (
+            self.coin_folders.get(coin)
+            or build_coin_folders(self.settings["main_neural_dir"], [coin])[coin]
+        )
         os.makedirs(coin_cwd, exist_ok=True)
 
         # The trainer runs from the (read-only) program folder with the coin's
@@ -5642,12 +5620,7 @@ Platform: {sys.platform}
             print(f"DEBUG: Cannot schedule auto-retrain for {coin}: widget error")
             return
 
-        # Cancel existing timer if any
-        if coin in self.auto_retrain_timers:
-            try:
-                root_widget.after_cancel(self.auto_retrain_timers[coin])
-            except Exception:
-                pass
+        self._cancel_auto_retrain(coin)  # an earlier timer for this coin
 
         # Schedule new auto-retrain
         interval_ms = int(
@@ -5656,6 +5629,11 @@ Platform: {sys.platform}
 
         def auto_retrain():
             try:
+                if coin not in (self.coins or []):  # removed from the coin list
+                    print(
+                        f"DEBUG: Auto-retrain for {coin} skipped: not in the coin list"
+                    )
+                    return
                 print(f"DEBUG: Auto-retraining {coin} after {interval_hours} hours")
                 if self._mock_trainer_refused():
                     # Unattended: no dialog (the next manual launch shows it).
@@ -5984,15 +5962,21 @@ Platform: {sys.platform}
             except Exception as e:
                 print(f"DEBUG: Error loading training time for {coin}: {e}")
 
+    def _cancel_auto_retrain(self, coin: str) -> None:
+        """Cancel ``coin``'s scheduled auto-retrain, if it has one."""
+        timer_id = self.auto_retrain_timers.pop(coin, None)
+        if timer_id is None:
+            return
+        try:
+            self.after_cancel(timer_id)  # the hub is the Tk root: no .master
+            print(f"DEBUG: Cancelled auto-retrain timer for {coin}")
+        except Exception:
+            pass
+
     def cancel_all_auto_retrains(self) -> None:
         """Cancel all scheduled auto-retraining timers."""
-        for coin, timer_id in self.auto_retrain_timers.items():
-            try:
-                self.after_cancel(timer_id)  # the hub is the Tk root: no .master
-                print(f"DEBUG: Cancelled auto-retrain timer for {coin}")
-            except Exception:
-                pass
-        self.auto_retrain_timers.clear()
+        for coin in list(self.auto_retrain_timers):
+            self._cancel_auto_retrain(coin)
 
     def stop_trainer_for_selected_coin(self) -> None:
         coin = (self.trainer_coin_var.get() or "").strip().upper()
@@ -6855,6 +6839,10 @@ Platform: {sys.platform}
         self.coin_folders = build_coin_folders(
             pt_paths.neural_dir(self.settings.get("main_neural_dir")), self.coins
         )
+        # A removed coin's auto-retrain would still fire, in a folder that is no
+        # longer its own (#146)
+        for coin in [c for c in self.auto_retrain_timers if c not in self.coins]:
+            self._cancel_auto_retrain(coin)
 
         # Refresh coin dropdowns (they don't auto-update)
         try:
