@@ -121,7 +121,7 @@ def test_config_file_holds_no_credential(manager):
     for ex in data["exchanges"]:
         assert not set(ex) & {"api_key", "api_secret", "passphrase"}
     reloaded = ExchangeConfigManager(os.path.dirname(manager.config_file))
-    reloaded.load_config()
+    reloaded.load_config(credentials=True)  # as the setup windows read it
     binance = reloaded.get_exchange_config("binance")
     assert (binance.api_key, binance.api_secret) == (
         "binance-key-value",
@@ -170,7 +170,7 @@ def test_a_legacy_plaintext_config_is_ignored_and_never_written_back(
         json.dump(legacy, f)
     m = ExchangeConfigManager(config_dir)
     with caplog.at_level(logging.WARNING):
-        config = m.load_config()
+        config = m.load_config(credentials=True)  # even when credentials are read
     ex = config.exchanges[0]
     assert ex.enabled and ex.api_key == "" and ex.api_secret == ""
     assert "binance.api_key" in caplog.text and "legacy-plain-key" not in caplog.text

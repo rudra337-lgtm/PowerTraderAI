@@ -89,7 +89,7 @@ class TestCoinbaseSetupWindow(unittest.TestCase):
         self.gui.api_secret_text.insert("1.0", secret)
 
     def saved(self):
-        self.manager.load_config()
+        self.manager.load_config(credentials=True)  # as the window reads it
         return self.manager.get_exchange_config("coinbase")
 
     def results(self):

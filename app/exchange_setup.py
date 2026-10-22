@@ -155,7 +155,7 @@ def setup_exchange_credentials(
 
 def configure_exchanges(config_manager: ExchangeConfigManager):
     """Interactive exchange configuration"""
-    config = config_manager.load_config()
+    config = config_manager.load_config(credentials=True)
     if not config:
         region = get_user_region()
         config = config_manager.create_default_config(region)
@@ -193,7 +193,7 @@ def configure_exchanges(config_manager: ExchangeConfigManager):
                 if 0 <= ex_choice < len(config.exchanges):
                     exchange_name = config.exchanges[ex_choice].exchange_type
                     setup_exchange_credentials(config_manager, exchange_name)
-                    config = config_manager.load_config()  # Reload
+                    config = config_manager.load_config(credentials=True)  # Reload
                 else:
                     print("❌ Invalid exchange number")
             except ValueError:
@@ -214,7 +214,7 @@ def configure_exchanges(config_manager: ExchangeConfigManager):
                     config_manager.enable_exchange(exchange.exchange_type, new_status)
                     action = "enabled" if new_status else "disabled"
                     print(f"✅ {exchange.exchange_type.title()} {action}")
-                    config = config_manager.load_config()  # Reload
+                    config = config_manager.load_config(credentials=True)  # Reload
                 else:
                     print("❌ Invalid exchange number")
             except ValueError:
