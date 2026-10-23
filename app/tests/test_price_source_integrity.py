@@ -412,11 +412,11 @@ class VisibilityTests(PaperTraderCase):
     def test_price_note_text(self):
         self.assertEqual(price_note(None), "")
         self.assertEqual(
-            price_note({"state": "live", "degraded_last_hour": 0}), " · PRICES: LIVE"
+            price_note({"state": "live", "degraded_last_hour": 0}), "PRICES: LIVE"
         )
         self.assertEqual(
             price_note({"state": "degraded", "degraded_last_hour": 3}),
-            " · PRICES: DEGRADED (3 in last hour)",
+            "PRICES: DEGRADED (3 in last hour)",
         )
 
     def test_indicator_shows_the_note_in_paper_but_never_in_live(self):
@@ -433,11 +433,11 @@ class VisibilityTests(PaperTraderCase):
         paper = tm.read_trading_settings({"trading": {"mode": "paper"}})
         indicator = TradingModeIndicator(root, paper)
         indicator.update_price_integrity({"state": "live", "degraded_last_hour": 0})
-        self.assertEqual(indicator.cget("text"), "MODE: PAPER · PRICES: LIVE")
-        indicator.update_price_integrity({"state": "degraded", "degraded_last_hour": 2})
         self.assertEqual(
-            indicator.cget("text"), "MODE: PAPER · PRICES: DEGRADED (2 in last hour)"
-        )
+            indicator.cget("text"), "PRICES: LIVE"
+        )  # PAPER TRADING precedes it
+        indicator.update_price_integrity({"state": "degraded", "degraded_last_hour": 2})
+        self.assertEqual(indicator.cget("text"), "PRICES: DEGRADED (2 in last hour)")
         live = tm.read_trading_settings(
             {"trading": {"mode": "live", "active_broker": "kraken"}}
         )
