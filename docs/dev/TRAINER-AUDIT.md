@@ -399,7 +399,7 @@ check, so Phase 1 must confirm the upstream commit hash before recording it.
    is given a region, which `DataProvider` always does (`app/pt_data_provider.py:48-51`), replaces an unreadable
    `trading_config.json` with defaults (`app/pt_multi_exchange.py:314-316`), contrary to `load_config`'s docstring
    (`:109`).
-5. `trainer_status.json` is read by the hub but never written: `_write_training_status` is never called (and would
+5. `trainer_status.json` is read by the hub but never written: `_write_training_status` (removed since, with #145) is never called (and would
    write BTC's status into `<root>/BTC`).
 6. Auto-retrain: `cancel_all_auto_retrains` calls `self.master.after_cancel` on a `Tk` root whose `master` is None, so
    cancelling silently fails (INFERRED); a coin removed in Settings that still has a timer would retrain in BTC's folder

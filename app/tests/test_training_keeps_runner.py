@@ -48,6 +48,7 @@ def training_hub(folder):
         f.write("# stand-in\n")
     return types.SimpleNamespace(
         trainer_coin_var=Var("BTC"),
+        coins=["BTC"],
         coin_folders={"BTC": folder},
         settings={"main_neural_dir": folder},
         proc_trainer_path=trainer,
@@ -292,3 +293,74 @@ def test_the_stop_button_clears_the_training_mark(tmp_path):
             "exit_code": 1,
             "timestamp": mock.ANY,
         }
+
+
+# --- a coin removed from the coin list (#146) ------------------------------------------
+
+
+def test_a_coin_not_in_the_coin_list_is_not_trained_in_btcs_folder(tmp_path):
+    """A removed coin has no folder of its own. The hub fell back to the root, which
+    is BTC's folder, deleted BTC's model files and trained the coin there."""
+    folder = str(tmp_path)  # the root: BTC's folder
+    model = os.path.join(folder, "memories_1hour.txt")
+    with open(model, "w", encoding="utf-8") as f:
+        f.write("BTC's model")
+    hub = training_hub(folder)
+    hub.trainer_coin_var = Var("DOGE")  # no longer in the coin list
+    with mock.patch.object(
+        pt_hub.subprocess, "Popen", side_effect=AssertionError("trainer started")
+    ):
+        Hub.start_trainer_for_selected_coin(hub)
+    assert hub.trainers == {}
+    with open(model, encoding="utf-8") as f:
+        assert f.read() == "BTC's model"
+    hub.status.config.assert_called_once_with(
+        text="Training refused for DOGE: it is not in Coins in Settings"
+    )
+
+
+def test_removing_a_coin_cancels_its_auto_retrain(monkeypatch):
+    import helpers_trainer as ht
+
+    hub = ht.build_real_hub(monkeypatch)  # skips when Tk cannot start
+    try:
+        coins = list(hub.coins)
+        keep, drop = coins[0], coins[-1]
+        assert keep != drop
+        hub.settings["training_auto_enabled"] = True
+        for coin in (keep, drop):
+            hub._schedule_auto_retrain(coin)
+        dropped = hub.auto_retrain_timers[drop]
+        hub.settings["coins"] = [c for c in coins if c != drop]
+        hub._refresh_coin_dependent_ui(coins)
+        assert drop not in hub.auto_retrain_timers
+        assert keep in hub.auto_retrain_timers
+        assert dropped not in hub.tk.splitlist(hub.tk.call("after", "info"))
+    finally:
+        ht.close_hub(hub)
+
+
+def test_a_retrain_that_fires_after_its_coin_was_removed_does_nothing():
+    scheduled = {}
+
+    def after(ms, callback):
+        scheduled["callback"] = callback
+        return "after#1"
+
+    hub = types.SimpleNamespace(
+        settings={"training_auto_enabled": True, "training_auto_interval_hours": 6},
+        master=types.SimpleNamespace(after=after),
+        auto_retrain_timers={},
+        coins=["ETH", "ZEC"],
+        trainers={},
+        trainer_coin_var=Var("ETH"),
+        start_trainer_for_selected_coin=mock.Mock(),
+        _mock_trainer_refused=lambda: False,
+        status=mock.Mock(),
+    )
+    hub._cancel_auto_retrain = lambda coin: Hub._cancel_auto_retrain(hub, coin)
+    Hub._schedule_auto_retrain(hub, "ZEC")
+    hub.coins = ["ETH"]  # ZEC removed, its timer somehow not cancelled
+    scheduled["callback"]()
+    hub.start_trainer_for_selected_coin.assert_not_called()
+    assert hub.trainer_coin_var.get() == "ETH"
