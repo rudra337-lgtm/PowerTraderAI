@@ -267,10 +267,10 @@ def test_the_hub_started_without_platformdirs_says_so_and_exits_without_a_traceb
     assert out.returncode == 1, text
     assert "Traceback" not in text and "HUB STARTED" not in text
     assert "Multi-exchange support not available" not in text
-    # the import guard reports the real cause ...
-    assert "Warning: The Python package 'platformdirs' is not installed" in out.stdout
-    assert "EXCHANGE_SUPPORT_AVAILABLE False" in out.stdout
-    # ... and main() stops with it, on the console and in the error box
+    # importing pt_multi_exchange no longer needs the folders (#144: no file-system
+    # side effect at import), so its guard has nothing to report ...
+    assert "EXCHANGE_SUPPORT_AVAILABLE True" in out.stdout
+    # ... and main() stops with the real cause, on the console and in the error box
     assert (
         "PowerTraderAI cannot start. The Python package 'platformdirs' is not installed"
         in out.stderr
