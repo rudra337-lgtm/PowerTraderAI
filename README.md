@@ -178,7 +178,9 @@ junction are neither copied nor removed, and an old config file that is the same
 `.bak` copies, the old vault, `trading_config.json`, ...) is removed only when every key in it is in the
 credential store with the same value; otherwise it is kept and the window names the key that differs or
 is missing (never its value). To import a config file from
-somewhere else (for example a backup): `python app/pt_migrate.py --from <path>`.
+somewhere else (for example a backup): `python app/pt_migrate.py --from <path>`. If it differs
+from the file in use, the same rule applies: the file in use is kept and the import is saved next
+to it as `<name>.conflict-import.<ext>`.
 
 ## 📁 Project Structure
 
