@@ -553,6 +553,16 @@ def test_short_is_checked_before_long():
     assert sides[0] == "short"
 
 
+def _zero_low_model():
+    """Every timeframe active (no placeholders); 1hour and 2hour predict a -100% low,
+    so two low bounds are 0 and the runner's gap pass can never move them apart."""
+    model = {tf: h3._tf("1000000000.0", f"0.0 0.0{{}}{1 + i}.0{{}}-{1 + i}.0")
+             for i, tf in enumerate(TFS)}  # fmt: skip
+    model["1hour"] = h3._tf("1000000000.0", "0.0 0.1{}0.3{}-100.0")
+    model["2hour"] = h3._tf("1000000000.0", "0.0 0.1{}0.5{}-100.0")
+    return model
+
+
 def test_a_gap_pass_that_never_ends_holds(crafted, record, tmp_path):
     """Two active zero bounds loop the runner's gap pass for ever (when no placeholder
     sits at the same place in the other list, which makes the pass skip the pair);
@@ -561,17 +571,38 @@ def test_a_gap_pass_that_never_ends_holds(crafted, record, tmp_path):
     with pytest.raises(pattern_model.GapPassStuck):
         pattern_model.thinker_bounds(predictions)
     folder = tmp_path / "zero-low"
-    # every timeframe active (no placeholders); 1hour and 2hour predict a -100% low
-    model = {tf: h3._tf("1000000000.0", f"0.0 0.0{{}}{1 + i}.0{{}}-{1 + i}.0")
-             for i, tf in enumerate(TFS)}  # fmt: skip
-    model["1hour"] = h3._tf("1000000000.0", "0.0 0.1{}0.3{}-100.0")
-    model["2hour"] = h3._tf("1000000000.0", "0.0 0.1{}0.5{}-100.0")
-    h3.write_files(str(folder), model)
+    h3.write_files(str(folder), _zero_low_model())
     h3.publish_files(str(folder), "zero-low")
     _, hourly, frames = crafted
     t = int(pd.Timestamp(hourly["open_time"].iloc[-1]).timestamp()) + HOUR
     signal = _signal_at(strategy("zero-low", frames), frames["1h"], t)
     assert signal.action is Action.HOLD and signal.reason == "BOUNDS_NOT_CONVERGED"
+
+
+def test_the_live_runner_holds_where_its_gap_pass_never_ends(crafted, tmp_path):
+    """#153: on the same model the runner's own gap pass looped for ever, so the runner
+    stopped at this coin and used a CPU core. It now stops after GAP_PASS_LIMIT passes,
+    says so once, writes no new signals for the coin and finishes the sweep, as
+    STRAT-003 holds."""
+    folder = pt_paths.neural_dir()  # BTC's coin folder, as the runner resolves it
+    h3.write_files(folder, _zero_low_model())
+    h3.publish_files(folder, "zero-low")
+    h3.stamp_trained(folder)
+    _, hourly, frames = crafted
+    t = int(pd.Timestamp(hourly["open_time"].iloc[-1]).timestamp()) + HOUR
+    records, out, code = hth.run_thinker(
+        str(tmp_path / "drive"),
+        "BTC",
+        hth.bars_from_frames(frames),
+        h3.thinker_decisions_at(hourly, [t]),  # two sweeps
+        timeout=120,
+    )
+    assert code == 0, out[-3000:]
+    limit = pattern_model.GAP_PASS_LIMIT
+    note = f"BTC: signals skipped this pass - its bounds did not separate in {limit:,} passes"
+    assert out.count(note) == 1, out[-3000:]  # said once, not on every sweep
+    assert records[-1]["signals_dca_spread.txt"] is None  # no signals written
+    assert records[-1]["tf_choice_index"] == 0  # both sweeps ran to the end
 
 
 # --- the backtester ----------------------------------------------------------------------------

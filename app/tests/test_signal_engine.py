@@ -539,9 +539,9 @@ class HubNoteTests(unittest.TestCase):
         ind.update_signals_note(
             read_strategy_settings({"strategy": {"engine": "legacy_neural"}}).note
         )
-        self.assertEqual(ind.cget("text"), "MODE: PAPER · SIGNALS: LEGACY (UNTRAINED)")
+        self.assertEqual(ind.cget("text"), "SIGNALS: LEGACY (UNTRAINED)")
         ind.update_signals_note(read_strategy_settings({}).note)
-        self.assertEqual(ind.cget("text"), "MODE: PAPER · SIGNALS: STRAT-001 1h")
+        self.assertEqual(ind.cget("text"), "SIGNALS: STRAT-001 1h")
         live = tm.read_trading_settings(
             {"trading": {"mode": "live", "active_broker": "kraken"}}
         )

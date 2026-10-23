@@ -253,7 +253,8 @@ def test_migrated_settings_are_what_the_app_reads(legacy):
 
     assert not read_trading_settings().is_live
     m = ExchangeConfigManager()
-    cb = m.load_config() and m.get_exchange_config("coinbase")
+    # as the setup windows read it
+    cb = m.load_config(credentials=True) and m.get_exchange_config("coinbase")
     assert (cb.api_key, cb.api_secret, cb.credential_source) == (
         KEY_NAME,
         legacy["pem"].strip(),
