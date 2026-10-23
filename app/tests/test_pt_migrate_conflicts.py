@@ -348,25 +348,22 @@ def test_a_conflict_copy_of_a_config_file_is_stripped_like_a_migrated_one(
     ]
 
 
-def test_an_import_with_from_still_writes_no_conflict_copy(tmp_path):
-    """Conflict copies are for the legacy folders; ``--from`` is unchanged."""
+def test_an_import_with_from_writes_its_conflict_copy_too(tmp_path):
+    """#135: ``--from`` used to list the conflict and write nothing. It now keeps a
+    conflict copy like the legacy folders do, named for the import."""
     write(pt_paths.settings_file(), {"trading": {"mode": "paper"}, "mine": 1})
     other = write(
         str(tmp_path / "old-settings.json"),
         {"trading": {"mode": "live"}, "strategy": {}},
     )
     report = pt_migrate.import_config_file(other)
-    assert (
-        report.conflicts == [(other, pt_paths.settings_file())]
-        and report.conflict_copies == {}
-    )
-    assert not [
-        n for n in os.listdir(pt_paths.config_dir()) if pt_migrate.CONFLICT in n
+    copy = pt_paths.config_file("pt_config.conflict-import.json")
+    assert report.conflicts == [(other, pt_paths.settings_file())]
+    assert report.conflict_copies == {other: copy}
+    assert report.conflict_lines() == [
+        f"{pt_paths.settings_file()}: was already there, kept (in use)",
+        f"    {copy}: copy of {other}",
     ]
-    assert (
-        f"{other} was not copied; kept {pt_paths.settings_file()}"
-        in report.conflict_lines()
-    )
 
 
 # --- conflict copies are never overwritten ------------------------------------------------------

@@ -58,6 +58,12 @@ class OrderManagementDB:
         self.SessionLocal = None
         self._setup_database()
 
+    def close(self) -> None:
+        """Close the engine's connections. SQLite keeps one connection open for
+        the engine's life (StaticPool), which holds the file open on Windows."""
+        if self.engine is not None:
+            self.engine.dispose()
+
     def _setup_database(self):
         """Set up database engine and session factory."""
         try:
@@ -567,6 +573,15 @@ def get_order_db(database_url: Optional[str] = None) -> OrderManagementDB:
     if _db_instance is None:
         _db_instance = OrderManagementDB(database_url)
     return _db_instance
+
+
+def close_order_db() -> None:
+    """Close the global instance's connections (an SQLite file is released) and
+    forget it: the next ``get_order_db`` opens the database again."""
+    global _db_instance
+    if _db_instance is not None:
+        _db_instance.close()
+        _db_instance = None
 
 
 def initialize_order_management_system(

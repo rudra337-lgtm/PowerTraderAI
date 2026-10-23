@@ -518,7 +518,7 @@ class ExchangeConfigGUI:
         for item in self.exchange_tree.get_children():
             self.exchange_tree.delete(item)
 
-        config = self.config_manager.load_config()
+        config = self.config_manager.load_config(credentials=True)
 
         # Add all exchanges from comprehensive list
         for exchange_id, region, ex_type, display_name, tier in self.all_exchanges:
@@ -689,7 +689,7 @@ class ExchangeConfigGUI:
             self.passphrase_entry.grid_remove()
 
         # Load existing credentials (pt_secrets: environment, then OS keyring)
-        config = self.config_manager.load_config()
+        config = self.config_manager.load_config(credentials=True)
         api_key = ""
         api_secret = ""
         source = ""
@@ -1064,7 +1064,7 @@ Official docs usually found at: https://{exchange_name}.com/api-docs
     def _saved_credentials(self, exchange_name: str):
         """The saved ExchangeConfig for ``exchange_name``, or None."""
         if self.config_manager.config is None:
-            self.config_manager.load_config()
+            self.config_manager.load_config(credentials=True)
         return self.config_manager.get_exchange_config(exchange_name)
 
     def _form_credentials(self):
@@ -1196,7 +1196,7 @@ Official docs usually found at: https://{exchange_name}.com/api-docs
         self.results_text.delete(1.0, tk.END)
         self._append_result("🧪 Testing all configured exchanges...\n\n")
 
-        config = self.config_manager.load_config()
+        config = self.config_manager.load_config(credentials=True)
         targets = [
             ex.exchange_type
             for ex in (config.exchanges if config else [])

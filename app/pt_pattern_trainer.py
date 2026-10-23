@@ -108,6 +108,7 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 import pt_paths  # noqa: E402
+import trainer_status  # noqa: E402
 
 UPSTREAM_REPO = "github.com/garagesteve1155/PowerTrader_AI"
 UPSTREAM_COMMIT = "ba62130"
@@ -1159,6 +1160,8 @@ def _existing_model_files(folder: str):
 
 
 def _write_status(folder, coin, state, started_at, **extra):
+    """trainer_status.json. ``TRAINING`` also records this process, so a reader can
+    tell a trainer that was killed from one that still runs (trainer_status, #145)."""
     status = {"coin": coin, "state": state, "started_at": started_at, **extra}
     status["timestamp"] = extra.get("finished_at", int(time.time()))
     _write_text(os.path.join(folder, "trainer_status.json"), json.dumps(status))
@@ -1191,7 +1194,7 @@ def main(argv=None) -> int:
         )
         return 2
     started_at = int(started)
-    _write_status(folder, coin, "TRAINING", started_at)
+    _write_status(folder, coin, "TRAINING", started_at, **trainer_status.this_process())
     try:
         result = train(
             coin,

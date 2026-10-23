@@ -759,6 +759,31 @@ def test_missing_candles_end_the_run_with_an_error_and_no_stamp(tmp_path, monkey
     assert ht.model_files(str(folder)) == {}
 
 
+def test_the_training_status_records_the_trainers_process(tmp_path, monkeypatch):
+    """#145: a trainer killed outside the hub can't write ERROR. Its process in the
+    TRAINING status lets the hub and the runner see that it has gone."""
+    import psutil
+
+    folder = tmp_path / "coin"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
+    statuses = []
+    real = ppt._write_text
+
+    def spy(path, text):
+        if os.path.basename(path) == "trainer_status.json":
+            statuses.append(json.loads(text))
+        return real(path, text)
+
+    monkeypatch.setattr(ppt, "_write_text", spy)
+    assert ppt.main(["ETH", "--offline", *window_args()]) == 1
+    training, ended = statuses[0], statuses[-1]
+    assert training["state"] == "TRAINING"
+    assert training["pid"] == os.getpid()
+    assert training["pid_started"] == psutil.Process().create_time()
+    assert ended["state"] == "ERROR" and "pid" not in ended
+
+
 @pytest.mark.parametrize(
     "argv",
     [

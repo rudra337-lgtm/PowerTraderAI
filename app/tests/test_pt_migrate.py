@@ -253,7 +253,8 @@ def test_migrated_settings_are_what_the_app_reads(legacy):
 
     assert not read_trading_settings().is_live
     m = ExchangeConfigManager()
-    cb = m.load_config() and m.get_exchange_config("coinbase")
+    # as the setup windows read it
+    cb = m.load_config(credentials=True) and m.get_exchange_config("coinbase")
     assert (cb.api_key, cb.api_secret, cb.credential_source) == (
         KEY_NAME,
         legacy["pem"].strip(),
@@ -450,6 +451,77 @@ def test_import_detects_kind_by_content_and_never_overwrites(tmp_path):
     bad = write(str(tmp_path / "notes.json"), [1, 2, 3])
     assert pt_migrate.import_config_file(bad).errors
     assert pt_migrate.import_config_file(str(tmp_path / "missing.json")).errors
+
+
+def test_an_import_that_conflicts_is_saved_next_to_the_file_in_use(
+    tmp_path, memory_keyring, capsys
+):
+    """#135: the import listed the conflict and wrote nothing, so the user had to
+    compare the files by hand. Like the start-up migration, it now keeps the file in
+    use and saves the cleaned import as <name>.conflict-import.<ext>."""
+    in_use = write(
+        pt_paths.trading_config_file(),
+        {"user_region": "EU", "primary_exchange": "binance", "exchanges": []},
+    )
+    with open(in_use, "rb") as f:
+        before = f.read()
+    backup = write(
+        str(tmp_path / "backups" / "trading_config.json"),
+        {
+            "user_region": "UK",
+            "primary_exchange": "kraken",
+            "exchanges": [
+                {
+                    "exchange_type": "kraken",
+                    "enabled": True,
+                    "region_preference": 1,
+                    "api_key": "backup-key",
+                    "api_secret": "backup-secret",
+                }
+            ],
+        },
+    )
+    assert pt_migrate.main(["--from", backup]) == 0
+    with open(in_use, "rb") as f:
+        assert f.read() == before  # the file in use is untouched
+    copy = pt_paths.config_file("trading_config.conflict-import.json")
+    with open(copy, encoding="utf-8") as f:
+        text = f.read()
+    assert json.loads(text)["primary_exchange"] == "kraken"
+    assert "backup-key" not in text and "backup-secret" not in text
+    out = capsys.readouterr().out
+    with open(pt_paths.config_file("migration-report.md"), encoding="utf-8") as f:
+        report = f.read()
+    for listing in (out, report):
+        assert "trading_config.json" in listing
+        assert "trading_config.conflict-import.json" in listing
+
+    files = sorted(os.listdir(pt_paths.config_dir()))
+    assert pt_migrate.main(["--from", backup]) == 0  # the same import again
+    assert sorted(os.listdir(pt_paths.config_dir())) == files  # nothing new
+
+    other = write(
+        str(tmp_path / "backups" / "trading_config.older.json"),
+        {"user_region": "US", "primary_exchange": "", "exchanges": []},
+    )
+    assert pt_migrate.main(["--from", other]) == 0
+    with open(pt_paths.config_file("trading_config.conflict-import-2.json")) as f:
+        assert json.load(f)["user_region"] == "US"  # never over the first copy
+
+
+def test_a_live_import_never_turns_a_paper_config_live(tmp_path):
+    from trading_mode import read_trading_settings
+
+    in_use = write(pt_paths.settings_file(), {"trading": {"mode": "paper"}})
+    with open(in_use, "rb") as f:
+        before = f.read()
+    live = write(str(tmp_path / "pt_config.json"), {"trading": {"mode": "live"}})
+    assert pt_migrate.main(["--from", live]) == 0
+    assert not read_trading_settings().is_live
+    with open(in_use, "rb") as f:
+        assert f.read() == before
+    with open(pt_paths.config_file("pt_config.conflict-import.json")) as f:
+        assert json.load(f)["trading"]["mode"] == "live"  # kept aside, not used
 
 
 # --- removing old files ------------------------------------------------------------------------

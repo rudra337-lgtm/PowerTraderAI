@@ -346,7 +346,6 @@ def build_real_hub(monkeypatch):
 
     for flag in HEAVY_FLAGS:
         monkeypatch.setattr(pt_hub, flag, False)
-    monkeypatch.setattr(pt_hub, "fetch_binance_btc_price", lambda *a, **k: None)
     dialogs = []
     for name in DIALOGS:
         monkeypatch.setattr(

@@ -66,7 +66,7 @@ class TestFreshCloneFallback(unittest.TestCase):
         self.assertTrue(os.path.exists(self.real))
 
         fresh = ExchangeConfigManager(self.tmp.name)
-        fresh.load_config()
+        fresh.load_config(credentials=True)  # as the setup windows read it
         saved = fresh.get_exchange_config(name)
         self.assertEqual(
             (saved.api_key, saved.api_secret), ("KEY-NAME", "SECRET-VALUE")

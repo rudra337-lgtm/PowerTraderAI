@@ -215,6 +215,24 @@ class TestMultiExchange(TestBase):
 class TestOrderManagement(TestBase):
     """Test order management system"""
 
+    def setUp(self):
+        super().setUp()
+        self._release_order_management()  # one made by an earlier test
+
+    def tearDown(self):
+        # Before the test folder goes: the global order manager holds its database
+        # open (and runs a monitoring thread), and no later test should inherit it.
+        self._release_order_management()
+        super().tearDown()
+
+    @staticmethod
+    def _release_order_management():
+        try:
+            from order_management_integration import shutdown_order_management
+        except ImportError:
+            return
+        shutdown_order_management()
+
     def test_order_models(self):
         """Test order data models"""
         try:

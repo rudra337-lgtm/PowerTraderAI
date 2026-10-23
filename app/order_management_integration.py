@@ -28,6 +28,7 @@ try:
     from order_management_db import (
         OrderManagementDB,
         PowerTraderOrderIntegration,
+        close_order_db,
         get_order_db,
     )
     from order_management_models import (
@@ -78,6 +79,7 @@ class OrderManager:
         self.market_data_cache = {}
         self.condition_check_thread = None
         self.is_monitoring = False
+        self._monitoring_stopped = threading.Event()  # wakes the loop on stop
         self.update_callbacks = []
 
         if self.is_available:
@@ -100,6 +102,7 @@ class OrderManager:
             return True
 
         self.is_monitoring = True
+        self._monitoring_stopped.clear()
         self.condition_check_thread = threading.Thread(
             target=self._condition_monitoring_loop, args=(check_interval,), daemon=True
         )
@@ -111,6 +114,7 @@ class OrderManager:
         """Stop the condition monitoring thread."""
         if self.is_monitoring:
             self.is_monitoring = False
+            self._monitoring_stopped.set()  # no waiting out check_interval
             if self.condition_check_thread:
                 self.condition_check_thread.join(timeout=10)
             logger.info("Stopped order condition monitoring")
@@ -132,11 +136,11 @@ class OrderManager:
                     # Clean up old market data
                     self._cleanup_old_market_data()
 
-                time.sleep(check_interval)
+                self._monitoring_stopped.wait(check_interval)
 
             except Exception as e:
                 logger.error(f"Error in condition monitoring: {e}")
-                time.sleep(check_interval)
+                self._monitoring_stopped.wait(check_interval)
 
     def _handle_triggered_order(self, order: Dict):
         """Handle an order that has been triggered."""
@@ -535,6 +539,18 @@ class PowerTraderOrderManagerAdapter:
 
 # Global order manager instance
 _global_order_manager: Optional[OrderManager] = None
+
+
+def shutdown_order_management() -> None:
+    """Stop the global order manager's monitoring and close its database, so the
+    next ``get_global_order_manager`` starts afresh (and an SQLite file it held
+    open is released)."""
+    global _global_order_manager
+    if _global_order_manager is not None:
+        _global_order_manager.stop_monitoring()
+        _global_order_manager = None
+    if ORDER_MANAGEMENT_AVAILABLE:
+        close_order_db()
 
 
 def get_global_order_manager(database_url: Optional[str] = None) -> OrderManager:
