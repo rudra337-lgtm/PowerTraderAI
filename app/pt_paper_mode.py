@@ -140,7 +140,9 @@ class PaperBanner(tk.Frame):
     """
     Top-of-window banner that screams PAPER TRADING. Visible only when
     paper mode is on. Single tk.Frame so we can pack/forget cheaply on
-    toggle without rebuilding the layout.
+    toggle without rebuilding the layout. It is the whole header row: the hub
+    packs the mode strip (price and signal notes) into it, right of the title
+    (owner, 2026-10-23).
     """
 
     def __init__(
@@ -170,17 +172,6 @@ class PaperBanner(tk.Frame):
         )
         label.pack(side="left")
 
-        self.price_var = tk.StringVar(value="Live BTC: --")
-        price_lbl = tk.Label(
-            self,
-            textvariable=self.price_var,
-            bg=palette["ACCENT"],
-            fg=palette["BG"],
-            font=ui_tokens.font("body"),
-            padx=10,
-        )
-        price_lbl.pack(side="left")
-
         run_btn = tk.Button(
             self,
             text="Run sample trade",
@@ -205,12 +196,6 @@ class PaperBanner(tk.Frame):
             padx=8,
         )
         result_lbl.pack(side="right")
-
-    def set_price(self, price: Optional[Decimal]) -> None:
-        if price is None:
-            self.price_var.set("Live BTC: offline (using sim)")
-        else:
-            self.price_var.set(f"Live BTC: ${float(price):,.2f}")
 
     def set_result(self, text: str) -> None:
         self.result_var.set(text)

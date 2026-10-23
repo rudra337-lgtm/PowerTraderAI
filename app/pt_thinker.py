@@ -25,6 +25,7 @@ from nacl.signing import SigningKey
 # Local imports
 import model_store
 import pt_paths
+import trainer_status
 from market_data import listing as market_listing
 from pattern_model import GAP_PASS_LIMIT
 from pt_credentials import get_credentials
@@ -714,13 +715,9 @@ def _write_signal_counts(sym: str, longs: int, shorts: int) -> None:
 
 
 def _training_in_progress(sym: str) -> bool:
-    """The pattern trainer marks trainer_status.json TRAINING while it runs."""
-    try:
-        path = os.path.join(coin_folder(sym), "trainer_status.json")
-        with open(path, encoding="utf-8") as f:
-            return str(json.load(f).get("state", "")).upper() == "TRAINING"
-    except Exception:
-        return False
+    """The pattern trainer marks trainer_status.json TRAINING while it runs; a killed
+    trainer's TRAINING does not count (trainer_status)."""
+    return trainer_status.training_in(coin_folder(sym))
 
 
 # Coins skipped because the data source has no market for them (symbol -> reason).
