@@ -311,10 +311,22 @@ class ExchangeFactory:
         cls._exchanges[exchange_type] = exchange_class
 
     @classmethod
+    def _registered(cls) -> dict:
+        """The registry, with the connectors loaded. They register themselves when
+        pt_exchanges is imported; until something had imported it, the factory
+        knew no exchange at all, so its answers depended on import order."""
+        if not cls._exchanges:
+            try:
+                import pt_exchanges  # noqa: F401  (registers the connectors)
+            except ImportError:  # e.g. requests missing: no connectors
+                pass
+        return cls._exchanges
+
+    @classmethod
     def get_exchange_class(cls, exchange_type: ExchangeType) -> Optional[type]:
         """The registered implementation class, or None. Unlike ``get_exchange``
         this does not look up any stored credentials."""
-        return cls._exchanges.get(exchange_type)
+        return cls._registered().get(exchange_type)
 
     @classmethod
     def load_credentials(cls, config_path: str = None):
@@ -362,7 +374,7 @@ class ExchangeFactory:
         credential supplied in two places can no longer raise "multiple values
         for keyword argument" and silently drop the exchange.
         """
-        if exchange_type not in cls._exchanges:
+        if exchange_type not in cls._registered():
             raise ValueError(f"Exchange {exchange_type.value} not registered")
 
         options = dict(cls._credentials.get(exchange_type.value, {}))
@@ -393,8 +405,9 @@ class ExchangeFactory:
     def get_available_exchanges(cls, region: str = None) -> List[ExchangeType]:
         """Get list of available exchanges for region"""
         available = []
+        registered = cls._registered()
         for exchange_type in ExchangeType:
-            if exchange_type in cls._exchanges:
+            if exchange_type in registered:
                 if region is None:
                     available.append(exchange_type)
                 else:
