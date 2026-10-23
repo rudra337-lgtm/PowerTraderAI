@@ -45,7 +45,12 @@ def pack_at_top(widget: tk.Misc, parent: tk.Misc) -> None:
 
 
 class TradingModeIndicator(tk.Label):
-    """Always-visible strip showing the current trading mode and broker."""
+    """Always-visible strip: the trading mode and broker, the price and signal notes.
+
+    Live and testnet: a strip of its own at the top ("MODE: LIVE — kraken · ...").
+    Paper: the hub packs it into the PAPER TRADING banner, right of that title, so
+    the header is one row and the strip does not repeat the mode ("PRICES: LIVE ·
+    SIGNALS: STRAT-001 1h")."""
 
     def __init__(self, parent: tk.Misc, settings: TradingSettings) -> None:
         super().__init__(
@@ -86,17 +91,18 @@ class TradingModeIndicator(tk.Label):
             bg, fg = TESTNET_BG, TESTNET_FG
         else:
             bg, fg = LIVE_BG, LIVE_FG
-        text = settings.label
-        if not settings.is_live:
-            text += price_note(self._price_integrity)
-        if self._signals_note:
-            text += f" · {self._signals_note}"
+        if settings.is_live:
+            parts = [settings.label]
+        else:  # the banner's PAPER TRADING title stands before it
+            parts = [price_note(self._price_integrity)]
+        parts.append(self._signals_note)
+        text = " · ".join(p for p in parts if p)
         self.configure(text=text, bg=bg, fg=fg)
 
 
 def price_note(price_integrity: Optional[dict]) -> str:
-    """ "  ·  PRICES: LIVE" / "  ·  PRICES: DEGRADED (n in last hour)" for the paper
-    strip; empty until the trader has reported (no claim without data)."""
+    """ "PRICES: LIVE" / "PRICES: DEGRADED (n in last hour)" for the paper strip;
+    empty until the trader has reported (no claim without data)."""
     if not isinstance(price_integrity, dict):
         return ""
     try:
@@ -104,8 +110,8 @@ def price_note(price_integrity: Optional[dict]) -> str:
     except (TypeError, ValueError):
         return ""
     if degraded > 0 or price_integrity.get("state") == "degraded":
-        return f" · PRICES: DEGRADED ({degraded} in last hour)"
-    return " · PRICES: LIVE"
+        return f"PRICES: DEGRADED ({degraded} in last hour)"
+    return "PRICES: LIVE"
 
 
 class TradingModeDialog(tk.Toplevel):
