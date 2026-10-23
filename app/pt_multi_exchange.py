@@ -6,6 +6,7 @@ Handles multi-exchange setup, credentials, and region-based selection
 import json
 import logging
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -34,8 +35,8 @@ class ExchangeConfig:
     """Configuration for a single exchange.
 
     ``api_key``/``api_secret``/``passphrase`` are filled in memory from
-    ``pt_secrets`` when the config is loaded and are never written to the
-    config file; ``repr`` never shows them.
+    ``pt_secrets`` only when asked for (``load_config(credentials=True)``) and
+    are never written to the config file; ``repr`` never shows them.
     """
 
     exchange_type: str
@@ -84,34 +85,51 @@ def _credential_field(exchange: str, attr: str) -> Optional[str]:
         return None
 
 
+def _free_name(path: str) -> str:
+    """``path``, or ``path-2``, ``path-3`` ... : the first name not taken."""
+    candidate, n = path, 1
+    while os.path.exists(candidate):
+        n += 1
+        candidate = f"{path}-{n}"
+    return candidate
+
+
 class ExchangeConfigManager:
     """Manages exchange configuration. Credentials go through ``pt_secrets``:
-    the config file holds no secret, the in-memory ``ExchangeConfig`` objects
-    carry the credentials read from the environment or the OS keyring."""
+    the config file holds no secret, and the in-memory ``ExchangeConfig`` objects
+    carry credentials (from the environment or the OS keyring) only for code that
+    asks for them: the exchange setup windows (#144)."""
 
     def __init__(self, config_dir: str = None):
         # Default: the user config folder, falling back to the read-only template
         # shipped in the program folder. An explicit folder uses its own example.
+        # Reading creates no folder; save_config creates it.
         if config_dir is None:
-            config_dir = pt_paths.config_dir()
+            config_dir = pt_paths.config_dir(create=False)
             self.example_file = pt_paths.shipped_default(EXAMPLE_CONFIG_NAME)
         else:
             self.example_file = os.path.join(config_dir, EXAMPLE_CONFIG_NAME)
         self.config_file = os.path.join(config_dir, pt_paths.TRADING_CONFIG_FILE)
         self.config: Optional[TradingConfig] = None
+        # Why the last load_config returned None for an existing file, else None
+        self.load_error: Optional[str] = None
 
-    def load_config(self) -> Optional[TradingConfig]:
+    def load_config(self, credentials: bool = False) -> Optional[TradingConfig]:
         """Load trading configuration.
 
         Reads ``trading_config.json``. If that file does not exist (a fresh
         clone) the committed example is used instead, so there is always a
         config to edit; the real file is only created by ``save_config``. A
         real file that exists but cannot be read is NOT replaced by the example
-        (that would hide the problem and a later save would overwrite it).
+        (that would hide the problem and a later save would overwrite it):
+        ``load_error`` says why, naming the file.
 
-        Credential fields found in the file are ignored (with a warning) and
-        never written back; credentials come from ``pt_secrets``.
+        Credentials are read from ``pt_secrets`` only with ``credentials=True``
+        (the exchange setup windows); market data and the region lookup read
+        none (#144). Credential fields found in the file are ignored (with a
+        warning) and never written back.
         """
+        self.load_error = None
         for path in (self.config_file, self.example_file):
             if not os.path.exists(path):
                 continue
@@ -123,6 +141,9 @@ class ExchangeConfigManager:
                     self._exchange_from_file(ex, path)
                     for ex in data.get("exchanges", [])
                 ]
+                if credentials:
+                    for ex in exchanges:
+                        _fill_credentials(ex)
 
                 self.config = TradingConfig(
                     user_region=data.get("user_region", "GLOBAL"),
@@ -133,7 +154,11 @@ class ExchangeConfigManager:
                 )
                 return self.config
             except Exception as e:
-                print(f"Error loading config: {e}")
+                self.load_error = (
+                    f"{path} cannot be read ({e}); it was left unchanged. "
+                    "Fix it or remove it, then start again."
+                )
+                print(f"ERROR: {self.load_error}")
                 return None
 
         return None
@@ -155,9 +180,7 @@ class ExchangeConfigManager:
                 continue
             if key in _FILE_FIELDS:
                 settings[key] = value
-        ex = ExchangeConfig(**settings)
-        _fill_credentials(ex)
-        return ex
+        return ExchangeConfig(**settings)
 
     def save_config(self, config: TradingConfig):
         """Save trading configuration: settings to the file, credentials to the
@@ -242,6 +265,11 @@ class ExchangeConfigManager:
             user_region=user_region, primary_exchange=primary, exchanges=exchanges
         )
 
+        # Defaults never silently replace a file: an existing one is kept (#144)
+        if os.path.exists(self.config_file):
+            backup = _free_name(self.config_file + ".bak")
+            shutil.copy2(self.config_file, backup)
+            print(f"{self.config_file} replaced by defaults; the original is {backup}")
         self.save_config(config)
         return config
 
@@ -308,10 +336,20 @@ class MultiExchangeManager:
         self.exchange_manager = ExchangeManager()
         self.initialized = False
 
-    def initialize(self, user_region: str = None) -> bool:
-        """Initialize exchange connections based on configuration"""
+    def initialize(
+        self, user_region: str = None, with_credentials: bool = False
+    ) -> bool:
+        """Connect the enabled exchanges in the configuration.
+
+        Without ``with_credentials`` (market data: prices and candles from public
+        endpoints) no credential is read. With it, each enabled exchange's
+        credentials are read as it connects, and no other exchange's (#144).
+        A ``trading_config.json`` that exists but cannot be read is left as it
+        is, and initialisation fails (``load_config`` says why)."""
         # Load or create configuration
         config = self.config_manager.load_config()
+        if config is None and os.path.exists(self.config_manager.config_file):
+            return False  # unreadable: never replaced by defaults
         if not config and user_region:
             config = self.config_manager.create_default_config(user_region)
         elif not config:
@@ -328,15 +366,17 @@ class MultiExchangeManager:
             try:
                 exchange_type = ExchangeType(exchange_config.exchange_type)
 
-                # Get credentials from config or environment
-                credentials = self._get_exchange_credentials(exchange_config)
-
-                # For public market data, allow connections without credentials
-                if not credentials:
+                # Credentials only when asked for, and only for this exchange
+                credentials = (
+                    self._get_exchange_credentials(exchange_config)
+                    if with_credentials
+                    else None
+                )
+                if with_credentials and not credentials:
                     print(
                         f"No credentials for {exchange_config.exchange_type}, trying public access..."
                     )
-                    credentials = {}
+                credentials = credentials or {}
 
                 # Add exchange to manager
                 if self.exchange_manager.add_exchange(exchange_type, **credentials):
@@ -498,7 +538,3 @@ class MultiExchangeManager:
             return pt_secrets.get_credentials(exchange_config.exchange_type)
         except pt_secrets.SecretsError:
             return None
-
-
-# Global instance for easy access
-multi_exchange_manager = MultiExchangeManager()

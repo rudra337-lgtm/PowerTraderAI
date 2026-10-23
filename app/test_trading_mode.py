@@ -759,7 +759,8 @@ class UiHelperTests(unittest.TestCase):
         self.addCleanup(root.destroy)
         root.withdraw()
         indicator = TradingModeIndicator(root, tm.read_trading_settings(PAPER))
-        self.assertEqual(indicator.cget("text"), "MODE: PAPER")
+        # paper: the banner's PAPER TRADING title says the mode; nothing reported yet
+        self.assertEqual(indicator.cget("text"), "")
         indicator.update_settings(tm.read_trading_settings(LIVE_KRAKEN))
         self.assertEqual(indicator.cget("text"), "MODE: LIVE — kraken")
 

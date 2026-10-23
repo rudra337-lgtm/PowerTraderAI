@@ -609,3 +609,41 @@ def test_the_chart_sits_4px_under_the_buttons_and_the_divider_moves_up(hub):
         assert alone.status_frame.pack_info()["pady"] == pt_hub.CHART_STATUS_ROW_PADY
     finally:
         alone.destroy()
+
+
+# --- the paper header (owner, 2026-10-23) ---------------------------------------------
+
+
+def test_the_paper_header_is_one_row_with_no_live_btc_price(hub):
+    """PAPER TRADING where MODE: PAPER was, the price and signal notes after it, and
+    Run sample trade at the right. The Live BTC price is gone."""
+    banner, strip = hub._paper_banner, hub._mode_indicator
+    assert hub.pack_slaves()[0] is banner  # the top of the window
+    assert strip not in hub.pack_slaves()  # not a row of its own
+    assert strip.pack_info()["in"] is banner
+    texts = [str(w.cget("text")) for w in banner.pack_slaves() if "text" in w.keys()]
+    assert texts[0] == "PAPER TRADING"
+    assert "Run sample trade" in texts
+    assert not [t for t in texts if "MODE" in t or "Live BTC" in t]
+    assert not hasattr(banner, "set_price")
+
+
+def test_switching_to_live_and_back_moves_the_mode_strip(hub):
+    import trading_mode as tm
+
+    strip = hub._mode_indicator
+    hub._on_trading_mode_applied(
+        tm.read_trading_settings(
+            {"trading": {"mode": "live", "active_broker": "kraken"}}
+        )
+    )
+    assert hub._paper_banner is None
+    assert hub.pack_slaves()[0] is strip
+    assert str(strip.cget("text")).startswith("MODE: LIVE — kraken")
+    hub._on_trading_mode_applied(
+        tm.read_trading_settings({"trading": {"mode": "paper"}})
+    )
+    banner = hub._paper_banner
+    assert hub.pack_slaves()[0] is banner and strip.pack_info()["in"] is banner
+    children = hub.winfo_children()  # in stacking order, lowest first
+    assert children.index(strip) > children.index(banner)  # drawn above its banner
