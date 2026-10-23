@@ -74,10 +74,11 @@ Deviations from upstream, each with its reason:
    (upstream could hang or leave ``TRAINING``); bad arguments exit 2.
 9. ``--seed`` (default 0) is recorded and applied to Python's ``random``; upstream uses no
    randomness, so it changes nothing.
-10. The close weight's accuracy test (#150) compares a percentage with a percentage:
-    ``moves`` already holds the predicted close move in percent, so it is not scaled by
-    100 again (upstream's ``var3 = moves[indy] * 100``, unlike its high and low tests,
-    which divide by 100 when read).
+10. The close weight's accuracy test (#150) compares a percentage with a percentage.
+    ``moves`` already holds the predicted close move in percent (times the memory's
+    weight), so it is no longer multiplied by 100. Upstream's
+    ``var3 = moves[indy] * 100`` treated it like ``high_moves`` and ``low_moves``,
+    which are divided by 100 when read.
 
 Inputs (command line, else environment, else default):
 
@@ -568,12 +569,13 @@ class ModelFiles:
 
 
 def _close_weight_update(predicted_move, realised_move, weight):
-    """The close memory's new weight (#150). ``predicted_move`` and
-    ``realised_move`` are both close moves in percent: ``moves`` holds them as
-    percentages (unlike ``high_moves`` and ``low_moves``, which were divided by
-    100 when read). Upstream's rule, kept: +0.25 when the realised move is above
-    the predicted move's 10% band, -0.25 below it, capped at 2.0 and, alone of
-    the three tests, allowed to fall to -2.0."""
+    """The close memory's new weight (#150). ``predicted_move`` is the memory's
+    close move in percent times its weight (``moves[indy]``), and ``realised_move``
+    the close move that followed, in percent: the same units as the high and low
+    tests, whose moves are divided by 100 when read and multiplied back before they
+    are compared. Upstream's rule, kept: +0.25 when the realised move is above the
+    predicted move's 10% band, -0.25 below it, capped at 2.0 and, alone of the
+    three tests, allowed to fall to -2.0."""
     if realised_move > predicted_move + (predicted_move * 0.1):
         return min(weight + 0.25, 2.0)
     if realised_move < predicted_move - (predicted_move * 0.1):

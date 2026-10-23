@@ -570,11 +570,12 @@ def test_default_mode_keeps_upstreams_output_and_adds_the_unflushed_tail(tmp_pat
 
 
 def test_the_close_weight_update_keeps_the_units_of_its_inputs(monkeypatch, tmp_path):
-    """#150: ``moves`` holds close moves in percent (unlike ``high_moves`` and
-    ``low_moves``, which were divided by 100 when read), so the close test must
-    not scale it by 100. A +2% prediction met exactly by a +2% move is inside
-    the 10% band and keeps its weight; compared against ``moves[indy] * 100``
-    it looked like a miss far below the band and the weight fell."""
+    """#150: ``moves`` holds the memories' close moves in percent (times their
+    weights; ``high_moves`` and ``low_moves`` were divided by 100 when read), so
+    the close test must not scale it by 100. A +2% prediction met exactly by a
+    +2% move is inside the 10% band and keeps its weight; compared against
+    ``moves[indy] * 100`` it looked like a miss far below the band and the
+    weight fell."""
     calls = []
     real = ppt._close_weight_update
 
@@ -618,8 +619,8 @@ def test_the_close_weight_update_is_upstreams_band_and_its_own_floor():
     """Upstream's rules, kept: +0.25 above the 10% band, -0.25 below it, capped
     at 2.0; the close weight alone may fall to -2.0."""
     assert ppt._close_weight_update(2.0, 2.0, 1.0) == 1.0  # inside the band
-    assert ppt._close_weight_update(2.0, 2.3, 1.0) == 1.25  # undershot: up
-    assert ppt._close_weight_update(2.0, 1.7, 1.0) == 0.75  # overshot: down
+    assert ppt._close_weight_update(2.0, 2.3, 1.0) == 1.25  # move beat it: up
+    assert ppt._close_weight_update(2.0, 1.7, 1.0) == 0.75  # fell short: down
     assert ppt._close_weight_update(2.0, 50.0, 2.0) == 2.0  # capped at 2.0
     assert (
         ppt._close_weight_update(2.0, -50.0, 0.0) == -0.25
