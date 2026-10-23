@@ -44,7 +44,6 @@ from pt_paper_mode import (
     PAPER_MODE_BALANCE_KEY,
     PaperBanner,
     attach_trading_section_label,
-    fetch_binance_btc_price,
     run_sample_scenario,
 )
 import trainer_guard
@@ -2271,9 +2270,9 @@ class PowerTraderHub(tk.Tk):
             self._build_paper_banner()
             self._attach_paper_section_label()
 
-        # Always-visible MODE strip, packed above everything else (incl. banner).
+        # Always-visible MODE strip: in the banner in paper mode, else at the top
         self._mode_indicator = TradingModeIndicator(self, self._trading)
-        pack_at_top(self._mode_indicator, self)
+        self._place_mode_strip()
 
         # Refresh charts immediately when a timeframe is changed (don't wait for the 10s throttle).
         self.bind_all("<<TimeframeChanged>>", self._on_timeframe_changed)
@@ -2352,17 +2351,21 @@ class PowerTraderHub(tk.Tk):
             on_run_sample=self._run_paper_sample,
         )
         pack_at_top(self._paper_banner, self)
-        # Refresh price on the banner immediately, non-blocking via after().
-        self.after(50, self._refresh_paper_price)
 
-    def _refresh_paper_price(self) -> None:
-        if not self._paper_banner:
+    def _place_mode_strip(self) -> None:
+        """The MODE strip. In paper mode it sits in the banner, right of PAPER
+        TRADING, so the header is one row (owner, 2026-10-23); otherwise it is a
+        strip of its own above everything else."""
+        strip = getattr(self, "_mode_indicator", None)
+        if strip is None:
             return
-        price = fetch_binance_btc_price()
-        try:
-            self._paper_banner.set_price(price)
-        except tk.TclError:
-            pass
+        strip.pack_forget()
+        banner = self._paper_banner
+        if banner is not None:
+            strip.pack(in_=banner, side="left", fill="x", expand=True)
+            strip.lift(banner)  # the banner may be newer: keep the strip above it
+        else:
+            pack_at_top(strip, self)
 
     def _attach_paper_section_label(self) -> None:
         """Drop a 'PAPER TRADING' label at the top of the trades panel."""
@@ -2426,8 +2429,7 @@ class PowerTraderHub(tk.Tk):
         else:
             self._remove_paper_widgets()
             self._paper_account = None
-        if self._mode_indicator is not None:
-            pack_at_top(self._mode_indicator, self)  # keep the MODE strip topmost
+        self._place_mode_strip()
 
         trader_running = bool(
             self.proc_trader.proc and self.proc_trader.proc.poll() is None
@@ -2468,11 +2470,6 @@ class PowerTraderHub(tk.Tk):
             messagebox.showerror("Paper sample", f"Sample run failed: {exc}")
             return
         if self._paper_banner is not None:
-            self._paper_banner.set_price(
-                Decimal(str(result["live_price"]))
-                if result.get("live_price") is not None
-                else None
-            )
             delta = result["final_balance"] - result["starting_balance"]
             self._paper_banner.set_result(
                 f"buy ${result['buy_price']:,.2f} -> sell ${result['sell_price']:,.2f} "
